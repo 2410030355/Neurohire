@@ -12,6 +12,7 @@ from neurohire.views import (
     InterviewViewSet,
     MockInterviewViewSet,
     ResumeUploadView,
+    SeekerResumeView,
     GitHubSearchView,
     ProjectQAView,
     MockInterviewStartView,
@@ -44,5 +45,7 @@ urlpatterns = [
     path("api/auth/me/", MeView.as_view()),
     path("api/auth/logout/", LogoutView.as_view()),
     path("api/candidates/clear/", clear_candidates),
+    path("api/resume-improvement/", SeekerResumeView.as_view()),
+    path("api/upload-file/", ResumeUploadView.as_view()),
     path("auth/", include("social_django.urls", namespace="social")),
 ]
