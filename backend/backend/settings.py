@@ -97,8 +97,8 @@ LOGIN_REDIRECT_URL               = '/'
 LOGOUT_REDIRECT_URL              = '/'
 
 # After Google OAuth success — redirect to frontend
-SOCIAL_AUTH_LOGIN_REDIRECT_URL   = 'https://neurohire-bay.vercel.app/role-select'
-SOCIAL_AUTH_NEW_USER_REDIRECT_URL = 'https://neurohire-bay.vercel.app/role-select'
+SOCIAL_AUTH_LOGIN_REDIRECT_URL   = 'https://neurohire-bay.vercel.app/RoleSelect'
+SOCIAL_AUTH_NEW_USER_REDIRECT_URL = 'https://neurohire-bay.vercel.app/RoleSelect'
 SOCIAL_AUTH_LOGIN_ERROR_URL      = 'https://neurohire-bay.vercel.app/'
 
 # Pipeline to set user role after social auth
