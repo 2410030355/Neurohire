@@ -22,7 +22,6 @@ async function jsonFetch(path, options = {}) {
 
   const text = await res.text();
   let data = null;
-
   try {
     if (text) data = JSON.parse(text);
   } catch {
