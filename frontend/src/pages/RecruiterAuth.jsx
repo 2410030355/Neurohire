@@ -5,7 +5,7 @@ import { jsonFetch } from '@/api/http';
 import { createPageUrl } from '@/utils';
 import { useNavigate } from 'react-router-dom';
 
-const GOOGLE_OAUTH_URL = '/auth/login/google-oauth2/';
+const GOOGLE_OAUTH_URL = (import.meta.env.VITE_API_BASE_URL || 'https://neurohire-backend.onrender.com') + '/auth/login/google-oauth2/';
 
 export default function RecruiterAuth() {
   const [tab, setTab]         = useState('login');   // 'login' | 'register'

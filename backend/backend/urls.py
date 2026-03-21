@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.routers import DefaultRouter
 from neurohire.views import clear_candidates
@@ -43,4 +44,5 @@ urlpatterns = [
     path("api/auth/me/", MeView.as_view()),
     path("api/auth/logout/", LogoutView.as_view()),
     path("api/candidates/clear/", clear_candidates),
+    path("auth/", include("social_django.urls", namespace="social")),
 ]
