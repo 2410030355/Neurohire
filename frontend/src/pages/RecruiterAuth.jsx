@@ -32,7 +32,7 @@ export default function RecruiterAuth() {
       const data = await jsonFetch(endpoint, { method: 'POST', body: JSON.stringify(body) });
 
       if (data?.error) { setError(data.error); return; }
-      if (data?.user) localStorage.setItem('user', JSON.stringify(data.user));
+      if (data?.id || data?.email) localStorage.setItem('user', JSON.stringify(data));
       navigate(createPageUrl('RecruiterDashboard'));
     } catch (e) {
       setError(e.message || 'Something went wrong');
@@ -107,7 +107,7 @@ export default function RecruiterAuth() {
               )}
             </AnimatePresence>
 
-            <InputField icon={Mail} placeholder="you@company.com" type="email"
+            <InputField icon={Mail} placeholder="recruiter@company.com" type="email"
               value={form.email} onChange={set('email')} />
 
             <div className="relative">

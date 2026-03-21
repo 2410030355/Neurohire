@@ -50,7 +50,13 @@ export default function ProfileDropdown({ role: roleProp = 'jobseeker' }) {
     ? user.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : (user?.email?.[0] || 'U').toUpperCase();
 
-  const displayName = user?.full_name || user?.email?.split('@')[0] || 'User';
+  const displayName = (
+    user?.full_name?.trim() ||
+    (user?.first_name ? `${user.first_name} ${user?.last_name || ''}`.trim() : null) ||
+    user?.email?.split('@')[0] ||
+    user?.username ||
+    'User'
+  );
 
   const roleBadge = role === 'recruiter'
     ? { label: 'Recruiter', color: 'var(--nh-secondary)' }
