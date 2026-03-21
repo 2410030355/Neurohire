@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── shadcn/ui tokens aligned to LEXA dark theme ── */
+@layer base {
+  :root {
+    --background:                215 28% 7%;
+    --foreground:                213 18% 90%;
+    --card:                      220 25% 14%;
+    --card-foreground:           213 18% 90%;
+    --popover:                   220 25% 14%;
+    --popover-foreground:        213 18% 90%;
+    --primary:                   174 70% 56%;
+    --primary-foreground:        215 28% 7%;
+    --secondary:                 262 67% 75%;
+    --secondary-foreground:      215 28% 7%;
+    --muted:                     220 20% 18%;
+    --muted-foreground:          215 10% 56%;
+    --accent:                    220 20% 20%;
+    --accent-foreground:         213 18% 90%;
+    --destructive:               0 72% 71%;
+    --destructive-foreground:    215 28% 7%;
+    --border:                    220 13% 21%;
+    --input:                     220 20% 18%;
+    --ring:                      174 70% 56%;
+    --chart-1:                   174 70% 56%;
+    --chart-2:                   262 67% 75%;
+    --chart-3:                   43 96% 56%;
+    --chart-4:                   152 69% 52%;
+    --chart-5:                   0 72% 71%;
+    --radius:                    0.75rem;
+    --sidebar-background:        220 25% 11%;
+    --sidebar-foreground:        213 18% 90%;
+    --sidebar-primary:           174 70% 56%;
+    --sidebar-primary-foreground:215 28% 7%;
+    --sidebar-accent:            220 20% 18%;
+    --sidebar-accent-foreground: 213 18% 90%;
+    --sidebar-border:            220 13% 21%;
+    --sidebar-ring:              174 70% 56%;
+  }
+
+  /* Light mode overrides */
+  [data-theme="light"] {
+    --background:                210 17% 98%;
+    --foreground:                220 20% 12%;
+    --card:                      0 0% 100%;
+    --card-foreground:           220 20% 12%;
+    --popover:                   0 0% 100%;
+    --popover-foreground:        220 20% 12%;
+    --primary:                   174 85% 30%;
+    --primary-foreground:        0 0% 100%;
+    --secondary:                 262 83% 58%;
+    --secondary-foreground:      0 0% 100%;
+    --muted:                     210 14% 93%;
+    --muted-foreground:          215 13% 40%;
+    --accent:                    210 14% 93%;
+    --accent-foreground:         220 20% 12%;
+    --destructive:               0 84% 60%;
+    --destructive-foreground:    0 0% 100%;
+    --border:                    214 13% 86%;
+    --input:                     214 13% 93%;
+    --ring:                      174 85% 30%;
+    --chart-1:                   174 85% 30%;
+    --chart-2:                   262 83% 58%;
+    --chart-3:                   43 96% 45%;
+    --chart-4:                   152 69% 40%;
+    --chart-5:                   0 84% 60%;
+    --sidebar-background:        210 17% 98%;
+    --sidebar-foreground:        220 20% 12%;
+    --sidebar-primary:           174 85% 30%;
+    --sidebar-primary-foreground:0 0% 100%;
+    --sidebar-accent:            210 14% 93%;
+    --sidebar-accent-foreground: 220 20% 12%;
+    --sidebar-border:            214 13% 86%;
+    --sidebar-ring:              174 85% 30%;
+  }
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground; }
+}

@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ═══════════════════════════════════════════════════════════════
+   NEUROHIRE — LEXA-inspired dark theme
+   Default: dark navy  |  Optional: light mode via [data-theme="light"]
+   Gradient accent: teal #2DD4BF → purple #A78BFA
+═══════════════════════════════════════════════════════════════ */
+
+:root {
+  --nh-bg:              #0D1117;
+  --nh-bg-secondary:    #161B22;
+  --nh-card:            #1C2333;
+  --nh-card-hover:      #222D42;
+  --nh-primary:         #2DD4BF;
+  --nh-primary-light:   rgba(45,212,191,0.12);
+  --nh-secondary:       #A78BFA;
+  --nh-secondary-light: rgba(167,139,250,0.12);
+  --nh-success:         #34D399;
+  --nh-warning:         #FBBF24;
+  --nh-danger:          #F87171;
+  --nh-text:            #E6EDF3;
+  --nh-text-secondary:  #8B949E;
+  --nh-border:          #30363D;
+  --nh-border-light:    #21262D;
+  --nh-glass:           rgba(28,35,51,0.85);
+  --nh-shadow-sm:       0 1px 3px rgba(0,0,0,0.4);
+  --nh-shadow:          0 4px 16px rgba(0,0,0,0.5);
+  --nh-shadow-lg:       0 12px 32px rgba(0,0,0,0.6);
+  --nh-grad-from:       #2DD4BF;
+  --nh-grad-to:         #A78BFA;
+}
+
+/* ── Light mode ───────────────────────────────────────────────── */
+[data-theme="light"] {
+  --nh-bg:              #F6F8FA;
+  --nh-bg-secondary:    #FFFFFF;
+  --nh-card:            #FFFFFF;
+  --nh-card-hover:      #F0F6FF;
+  --nh-primary:         #0D9488;
+  --nh-primary-light:   rgba(13,148,136,0.10);
+  --nh-secondary:       #7C3AED;
+  --nh-secondary-light: rgba(124,58,237,0.10);
+  --nh-success:         #059669;
+  --nh-warning:         #D97706;
+  --nh-danger:          #DC2626;
+  --nh-text:            #1C2333;
+  --nh-text-secondary:  #57606A;
+  --nh-border:          #D0D7DE;
+  --nh-border-light:    #EAF0F6;
+  --nh-glass:           rgba(255,255,255,0.92);
+  --nh-shadow-sm:       0 1px 2px rgba(28,35,51,0.06);
+  --nh-shadow:          0 4px 12px rgba(28,35,51,0.10);
+  --nh-shadow-lg:       0 12px 28px rgba(28,35,51,0.14);
+  --nh-grad-from:       #0D9488;
+  --nh-grad-to:         #7C3AED;
+}
+
+* {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  background-color: var(--nh-bg);
+  color: var(--nh-text);
+}
+
+/* ── Glass card ──────────────────────────────────────────────── */
+.glass-card {
+  background: var(--nh-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--nh-border);
+  box-shadow: var(--nh-shadow-sm);
+}
+
+/* ── Gradient text: teal → purple ────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--nh-grad-from) 0%, var(--nh-grad-to) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Gradient button/bg ──────────────────────────────────────── */
+.gradient-bg {
+  background: linear-gradient(135deg, var(--nh-grad-from) 0%, var(--nh-grad-to) 100%);
+}
+
+.gradient-bg-subtle {
+  background: linear-gradient(135deg, var(--nh-primary-light) 0%, var(--nh-secondary-light) 100%);
+}
+
+/* ── Auth page — deep glow background like LEXA ─────────────── */
+.auth-bg {
+  background:
+    radial-gradient(ellipse at 20% 20%, rgba(45,212,191,0.07) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 80%, rgba(167,139,250,0.07) 0%, transparent 55%),
+    var(--nh-bg);
+}
+
+/* ── Input focus glow ────────────────────────────────────────── */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(45,212,191,0.30);
+}
+[data-theme="light"] input:focus,
+[data-theme="light"] textarea:focus {
+  box-shadow: 0 0 0 2px rgba(13,148,136,0.25);
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────── */
+.nh-scrollbar::-webkit-scrollbar        { width: 4px; }
+.nh-scrollbar::-webkit-scrollbar-track  { background: transparent; }
+.nh-scrollbar::-webkit-scrollbar-thumb  { background: var(--nh-border); border-radius: 4px; }
+
+/* ── Float animation ─────────────────────────────────────────── */
+.animate-float { animation: float 6s ease-in-out infinite; }
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
