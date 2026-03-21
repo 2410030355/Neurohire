@@ -34,9 +34,17 @@ export default function ProfileDropdown({ role: roleProp = 'jobseeker' }) {
   const ref = useRef(null);
 
   useEffect(() => {
+    // Always fetch fresh user data from backend on mount
     jsonFetch('/api/auth/me/').then(data => {
-      if (data) { setUser(data); localStorage.setItem('user', JSON.stringify(data)); }
-    }).catch(() => {});
+      if (data?.id || data?.email) {
+        setUser(data);
+        localStorage.setItem('user', JSON.stringify(data));
+      }
+    }).catch(() => {
+      // If /me/ fails, user is not logged in — clear stale data
+      const stored = localStorage.getItem('user');
+      if (stored) setUser(JSON.parse(stored));
+    });
   }, []);
 
   useEffect(() => {
