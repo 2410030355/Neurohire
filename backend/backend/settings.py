@@ -96,6 +96,25 @@ SOCIAL_AUTH_URL_NAMESPACE        = 'social'
 LOGIN_REDIRECT_URL               = '/'
 LOGOUT_REDIRECT_URL              = '/'
 
+# After Google OAuth success — redirect to frontend
+SOCIAL_AUTH_LOGIN_REDIRECT_URL   = 'https://neurohire-bay.vercel.app/role-select'
+SOCIAL_AUTH_NEW_USER_REDIRECT_URL = 'https://neurohire-bay.vercel.app/role-select'
+SOCIAL_AUTH_LOGIN_ERROR_URL      = 'https://neurohire-bay.vercel.app/'
+
+# Pipeline to set user role after social auth
+SOCIAL_AUTH_PIPELINE = (
+    'social_core.pipeline.social_auth.social_details',
+    'social_core.pipeline.social_auth.social_uid',
+    'social_core.pipeline.social_auth.auth_allowed',
+    'social_core.pipeline.social_auth.social_user',
+    'social_core.pipeline.user.get_username',
+    'social_core.pipeline.user.create_user',
+    'social_core.pipeline.social_auth.associate_user',
+    'social_core.pipeline.social_auth.load_extra_data',
+    'social_core.pipeline.user.user_details',
+    'neurohire.pipeline.save_user_profile',
+)
+
 # ── Internationalisation ──────────────────────────────────────────────────
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE     = 'UTC'
@@ -119,7 +138,14 @@ CORS_ALLOWED_ORIGINS   = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
     'http://localhost:5173,http://localhost:3000'
 ).split(',')
-CORS_ALLOW_ALL_ORIGINS = DEBUG   # True in dev, False in prod
+# Allow all in dev, restrict to listed origins in prod
+CORS_ALLOW_ALL_ORIGINS = DEBUG
+# Always allow these regardless of env
+CORS_ORIGIN_WHITELIST  = [
+    'https://neurohire-bay.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+]
 
 CORS_ALLOW_HEADERS = [
     'accept', 'accept-encoding', 'authorization',

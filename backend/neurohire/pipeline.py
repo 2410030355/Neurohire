@@ -1,16 +1,19 @@
-"""
-neurohire/pipeline.py
-Custom social-auth pipeline step — runs after Google login
-to ensure every user has a UserProfile with role='jobseeker'.
-"""
-
-def create_user_profile(backend, user, response, *args, **kwargs):
+def save_user_profile(backend, user, response, *args, **kwargs):
     """
-    After Google OAuth creates the Django user,
-    create a UserProfile with role='jobseeker' if one doesn't exist.
+    Social auth pipeline step — ensures UserProfile exists after Google login.
     """
-    from neurohire.models import UserProfile
-    UserProfile.objects.get_or_create(
-        user=user,
-        defaults={'role': 'jobseeker'}
-    )
+    try:
+        from neurohire.models import UserProfile
+        profile, created = UserProfile.objects.get_or_create(
+            user=user,
+            defaults={'role': 'jobseeker'}
+        )
+        if created:
+            # Try to get name from Google response
+            full_name = response.get('name', '')
+            if full_name:
+                user.first_name = full_name.split(' ')[0]
+                user.last_name = ' '.join(full_name.split(' ')[1:])
+                user.save()
+    except Exception as e:
+        pass
