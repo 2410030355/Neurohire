@@ -97,8 +97,8 @@ LOGIN_REDIRECT_URL               = '/'
 LOGOUT_REDIRECT_URL              = '/'
 
 # After Google OAuth success — redirect to frontend
-SOCIAL_AUTH_LOGIN_REDIRECT_URL   = 'https://neurohire-bay.vercel.app/RoleSelect'
-SOCIAL_AUTH_NEW_USER_REDIRECT_URL = 'https://neurohire-bay.vercel.app/RoleSelect'
+SOCIAL_AUTH_LOGIN_REDIRECT_URL   = 'https://neurohire-bay.vercel.app/SeekerDashboard'
+SOCIAL_AUTH_NEW_USER_REDIRECT_URL = 'https://neurohire-bay.vercel.app/SeekerDashboard'
 SOCIAL_AUTH_LOGIN_ERROR_URL      = 'https://neurohire-bay.vercel.app/'
 
 # Pipeline to set user role after social auth
@@ -113,7 +113,12 @@ SOCIAL_AUTH_PIPELINE = (
     'social_core.pipeline.social_auth.load_extra_data',
     'social_core.pipeline.user.user_details',
     'neurohire.pipeline.save_user_profile',
+    'neurohire.pipeline.set_redirect_url',
 )
+
+# Allow social auth to use next param for redirect
+SOCIAL_AUTH_REDIRECT_IS_HTTPS = True
+SOCIAL_AUTH_ALLOWED_REDIRECT_HOSTS = ['neurohire-bay.vercel.app']
 
 # ── Internationalisation ──────────────────────────────────────────────────
 LANGUAGE_CODE = 'en-us'
