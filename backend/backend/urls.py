@@ -46,6 +46,7 @@ urlpatterns = [
     path("api/auth/logout/", LogoutView.as_view()),
     path("api/candidates/clear/", clear_candidates),
     path("api/resume-improvement/", SeekerResumeView.as_view()),
+    path("api/seeker-resume/", SeekerResumeView.as_view()),
     path("api/upload-file/", ResumeUploadView.as_view()),
     path("auth/", include("social_django.urls", namespace="social")),
 ]
