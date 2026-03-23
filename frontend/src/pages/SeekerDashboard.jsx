@@ -5,7 +5,7 @@ import ResumeImprover from '@/components/seeker/ResumeImprover';
 import MockInterviewPanel from '@/components/seeker/MockInterviewPanel';
 import JobBoard from '@/components/seeker/JobBoard';
 import ProjectQA from '@/components/seeker/ProjectQA';
-import ProfileDropdown from '@/components/shared/ProfileDropdown';
+import SeekerProfileDropdown from '@/components/seeker/SeekerProfileDropdown';
 
 export default function SeekerDashboard() {
   const [activeTab, setActiveTab] = useState('resume');
@@ -26,7 +26,7 @@ export default function SeekerDashboard() {
           className="sticky top-0 z-10 flex items-center justify-end gap-3 px-6 py-3 backdrop-blur border-b"
           style={{ background: 'var(--nh-glass)', borderColor: 'var(--nh-border)' }}
         >
-          <ProfileDropdown role="jobseeker" />
+          <SeekerProfileDropdown />
         </div>
 
         <div className="flex-1 p-6 md:p-8">

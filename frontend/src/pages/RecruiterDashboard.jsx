@@ -14,7 +14,7 @@ import AIAnalytics from '@/components/recruiter/AIAnalytics';
 import ScheduleModal from '@/components/recruiter/ScheduleModal';
 import EmptyState from '@/components/shared/EmptyState';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
-import ProfileDropdown from '@/components/shared/ProfileDropdown';
+import RecruiterProfileDropdown from '@/components/recruiter/RecruiterProfileDropdown';
 
 export default function RecruiterDashboard() {
   const [activeTab, setActiveTab] = useState('analysis');
@@ -57,7 +57,7 @@ export default function RecruiterDashboard() {
           className="sticky top-0 z-10 flex items-center justify-end gap-3 px-6 py-3 backdrop-blur border-b"
           style={{ background: 'var(--nh-glass)', borderColor: 'var(--nh-border)' }}
         >
-          <ProfileDropdown role="recruiter" />
+        <RecruiterProfileDropdown />
         </div>
 
         <div className="flex-1 p-6 md:p-8">

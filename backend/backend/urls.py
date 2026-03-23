@@ -22,6 +22,7 @@ from neurohire.views import (
     LoginView,
     MeView,
     LogoutView,
+    ProfileUpdateView,
 )
 router = DefaultRouter()
 router.register(r"candidates", CandidateViewSet, basename="candidates")
@@ -48,5 +49,6 @@ urlpatterns = [
     path("api/resume-improvement/", SeekerResumeView.as_view()),
     path("api/seeker-resume/", SeekerResumeView.as_view()),
     path("api/upload-file/", ResumeUploadView.as_view()),
+    path("api/auth/profile/", ProfileUpdateView.as_view()),
     path("auth/", include("social_django.urls", namespace="social")),
 ]

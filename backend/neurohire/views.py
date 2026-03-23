@@ -199,6 +199,7 @@ class ResumeUploadView(APIView):
         file = request.FILES.get("resume")
         name = request.data.get("name", "Unknown")
         target_role = request.data.get("target_role", "")
+        job_description = request.data.get("job_description", "")
 
         if not file:
             return Response(
@@ -220,7 +221,7 @@ class ResumeUploadView(APIView):
             )
 
         try:
-            analysis = analyze_resume(file_path, target_role)
+            analysis = analyze_resume(file_path, target_role, job_description)
         except Exception as e:
             return Response(
                 {"error": f"Analysis failed: {str(e)}"},
@@ -234,6 +235,7 @@ class ResumeUploadView(APIView):
             'phone':                  analysis.get('phone'),
             'resume_url':             unique_name,
             'target_role':            target_role,
+            'job_description':        job_description,
             'source':                 'resume_upload',
             'status':                 'analyzed',
             # AI scores
@@ -1689,6 +1691,64 @@ class MeView(APIView):
         payload = _user_payload(request.user)
         if not payload:
             return Response(status=status.HTTP_401_UNAUTHORIZED)
+        return Response(payload)
+
+
+class ProfileUpdateView(APIView):
+    """Update the current user's profile details."""
+    permission_classes = [AllowAny]
+    authentication_classes = [SessionAuthentication]
+
+    def patch(self, request):
+        if not request.user or not request.user.is_authenticated:
+            return Response({'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        data = request.data or {}
+        user = request.user
+
+        # Update Django User fields
+        if 'full_name' in data:
+            parts = data['full_name'].strip().split(' ', 1)
+            user.first_name = parts[0]
+            user.last_name = parts[1] if len(parts) > 1 else ''
+            user.save()
+
+        # Update UserProfile fields
+        try:
+            profile = user.profile
+        except UserProfile.DoesNotExist:
+            profile = UserProfile.objects.create(user=user, role='jobseeker')
+
+        updatable = ['phone', 'company', 'college', 'bio', 'linkedin', 'location', 'job_title']
+        for field in updatable:
+            if field in data:
+                try:
+                    setattr(profile, field, data[field])
+                except Exception:
+                    pass
+        try:
+            profile.save()
+        except Exception:
+            pass
+
+        return Response(_user_payload(user))
+
+    def get(self, request):
+        if not request.user or not request.user.is_authenticated:
+            return Response({'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+        payload = _user_payload(request.user)
+        # Add extra profile fields
+        try:
+            profile = request.user.profile
+            payload['phone']     = getattr(profile, 'phone', '') or ''
+            payload['company']   = getattr(profile, 'company', '') or ''
+            payload['college']   = getattr(profile, 'college', '') or ''
+            payload['bio']       = getattr(profile, 'bio', '') or ''
+            payload['linkedin']  = getattr(profile, 'linkedin', '') or ''
+            payload['location']  = getattr(profile, 'location', '') or ''
+            payload['job_title'] = getattr(profile, 'job_title', '') or ''
+        except Exception:
+            pass
         return Response(payload)
 
 
