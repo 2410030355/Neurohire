@@ -75,7 +75,7 @@ Output is in the `dist/` folder. Point your web server or Django static files at
 
 ## Project structure
 
-- `src/` — React app (pages, components, API client)
-- `src/api/http.js` — Shared API base URL and `jsonFetch` helper for Django REST
-- `src/pages/` — Seeker and recruiter auth, dashboards, home
-- `src/components/` — UI components, recruiter (analysis, talent search, scheduling), seeker (resume improver, mock interview, job board)
+- `src/` -React app (pages, components, API client)
+- `src/api/http.js` -Shared API base URL and `jsonFetch` helper for Django REST
+- `src/pages/` - Seeker and recruiter auth, dashboards, home
+- `src/components/` - UI components, recruiter (analysis, talent search, scheduling), seeker (resume improver, mock interview, job board)
