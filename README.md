@@ -1,6 +1,6 @@
 # Neurohire
 
-**AI Resume Analyzer platform** — a full-stack application for recruiters and job seekers, built with **Django** (backend) and **React** (frontend).
+**AI Resume Analyzer platform** -a full-stack application for recruiters and job seekers, built with **Django** (backend) and **React** (frontend).
 
 ## About
 
@@ -8,11 +8,11 @@ Neurohire helps recruiters analyze resumes with AI, search talent across platfor
 
 ### Features
 
-- **Resume analysis** — Upload resumes; get AI-powered fit scores, skill gaps, and improvement suggestions
-- **Talent search** — Search candidates via GitHub or job portals (LinkedIn, Naukri, Internshala, Indeed)
-- **Scheduling** — Schedule interviews and manage waitlists
-- **AI analytics** — Track AI vs recruiter agreement on hiring decisions
-- **Job seeker tools** — Resume improver, project Q&A generator, audio mock interviews, job board
+- **Resume analysis** - Upload resumes; get AI-powered fit scores, skill gaps, and improvement suggestions
+- **Talent search** -Search candidates via GitHub or job portals (LinkedIn, Naukri, Internshala, Indeed)
+- **Scheduling** -Schedule interviews and manage waitlists
+- **AI analytics** - Track AI vs recruiter agreement on hiring decisions
+- **Job seeker tools** - Resume improver, project Q&A generator, audio mock interviews, job board
 
 ## Tech stack
 
