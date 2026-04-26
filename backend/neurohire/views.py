@@ -1679,6 +1679,93 @@ class LoginView(APIView):
         return Response(_user_payload(user))
 
 
+# ── Chatbot ─────────────────────────────────────────────────────────────────
+CHATBOT_INTENTS = {
+    'candidates': ['candidate','resume','applicant','profile','skill','fit','score','top','best','how many'],
+    'jobs':       ['job','role','position','opening','vacancy','hiring'],
+    'platform':   ['how','what','neurohire','feature','work','use','help','explain'],
+    'analytics':  ['haar','cdr','svc','lvs','metric','analytic','agreement','disagreement','fairness'],
+    'waitlist':   ['waitlist','scheduled','interview','schedule'],
+}
+
+def _chatbot_classify(msg):
+    msg = msg.lower()
+    scores = {k: sum(1 for w in v if w in msg) for k,v in CHATBOT_INTENTS.items()}
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else 'general'
+
+def _chatbot_reply(intent, message):
+    if intent == 'candidates':
+        try:
+            db = _get_db()
+            q = message.lower()
+            if 'how many' in q or 'count' in q or 'total' in q:
+                total = db.candidates.count_documents({})
+                high  = db.candidates.count_documents({'final_fit': 'High'})
+                return f"There are **{total}** candidates in the system, of which **{high}** are rated High fit."
+            skill_m = re.search(r'(?:with|skilled in|know|has)\s+([a-zA-Z+#.]+)', q)
+            if skill_m:
+                skill = skill_m.group(1)
+                cs = list(db.candidates.find({'skills':{'$regex':skill,'$options':'i'}},{'name':1,'final_fit':1,'_id':0}).limit(5))
+                if not cs: return f"No candidates with **{skill}** found yet."
+                return "Candidates with **{}**: {}.".format(skill, ', '.join(c['name'] for c in cs))
+            cs = list(db.candidates.find({},{'name':1,'role_match_score':1,'final_fit':1,'_id':0}).sort('role_match_score',-1).limit(5))
+            if not cs: return "No candidates analyzed yet. Upload resumes in the Resume Analysis tab."
+            lines = ["• {} — {} fit ({:.0f}%)".format(c['name'],c.get('final_fit','?'),c.get('role_match_score',0)) for c in cs]
+            return "Top candidates:\n" + "\n".join(lines)
+        except Exception as e:
+            return f"Couldn't fetch candidate data: {e}"
+
+    if intent == 'analytics':
+        return ("**HAAR** = Human-AI Agreement Rate\n"
+                "**CDR** = Consistency Defect Rate\n"
+                "**SVC** = Skill Validation Coverage\n"
+                "**LVS** = Learning Velocity Score\n"
+                "See the AI Analytics tab for live values.")
+
+    if intent == 'platform':
+        q = message.lower()
+        if 'skill' in q:
+            return "Skills are validated by scanning a 120-char window for action verbs (built/deployed/implemented). Result: Valid, Partial, or Unverified."
+        if 'score' in q or 'match' in q:
+            return "Role match uses TF-IDF cosine similarity between resume and job description, combined with skill and consistency scores."
+        if 'upload' in q:
+            return "You can upload PDF or DOCX resumes. The system auto-extracts skills, experience, education, and projects."
+        return ("NeuroHire has two modules:\n"
+                "• **Recruiter**: upload resumes, search GitHub, analyze candidates, track decisions\n"
+                "• **Seeker**: analyze resume, mock interviews, job board, project Q&A")
+
+    if intent == 'jobs':
+        return "Job listings come from the Remotive API. Browse them in the Job Board tab in the Seeker Dashboard."
+
+    if intent == 'waitlist':
+        return "Add candidates to waitlist from their card. View scheduled interviews in the Scheduled tab."
+
+    return ("I can help with:\n"
+            "• Candidates — scores, skills, fit\n"
+            "• Analytics — HAAR, CDR, SVC, LVS\n"
+            "• Platform — how features work\n"
+            "• Jobs & Waitlist\n\n"
+            "Try: *'Show top candidates'* or *'How does skill validation work?'*")
+
+
+class ChatbotView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def post(self, request):
+        message = (request.data.get('message') or '').strip()[:500]
+        if not message:
+            return Response({'error': 'Message required'}, status=status.HTTP_400_BAD_REQUEST)
+        intent = _chatbot_classify(message)
+        reply  = _chatbot_reply(intent, message)
+        try:
+            _get_db().chatbot_logs.insert_one({'message': message, 'intent': intent})
+        except Exception:
+            pass
+        return Response({'reply': reply, 'intent': intent})
+
+
 class MeView(APIView):
     """Return the current authenticated user's profile."""
     permission_classes = [AllowAny]

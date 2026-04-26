@@ -85,30 +85,60 @@ EDUCATION_KEYWORDS = {
 
 def extract_text_from_pdf(file_path: str) -> Tuple[str, str]:
     """
-    Extract text from PDF file.
+    Extract text from PDF or DOCX file.
     Returns: (lowercase_text, original_case_text)
-    Raises: Exception if PDF cannot be read
+    Raises: Exception if file cannot be read
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    if not file_path.lower().endswith('.pdf'):
-        raise ValueError("Only PDF files are supported")
+    ext = os.path.splitext(file_path.lower())[1]
 
+    # ── DOCX handling ──────────────────────────────────────────────
+    if ext in ('.docx', '.doc'):
+        try:
+            import docx as python_docx
+            doc = python_docx.Document(file_path)
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            # Also extract text from tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            paragraphs.append(cell.text)
+            text = "
+
+
+".join(paragraphs)
+if not text.strip():
+    raise ValueError("DOCX contains no extractable text")
+return text.lower(), text
+except ImportError:
+raise ValueError("python-docx not installed. Run: pip install python-docx")
+except Exception as e:
+logger.error(f"Failed to extract text from DOCX: {str(e)}")
+raise
+
+# ── PDF handling ───────────────────────────────────────────────
+if ext == '.pdf':
     try:
+        import fitz as pymupdf
+
         text = ""
-        doc = fitz.open(file_path)
+        doc = pymupdf.open(file_path)
         for page in doc:
             text += page.get_text()
         doc.close()
-
         if not text.strip():
-            raise ValueError("PDF contains no extractable text")
-
+            raise ValueError("PDF contains no extractable text (may be scanned image)")
         return text.lower(), text
+    except ImportError:
+        raise ValueError("PyMuPDF not installed. Run: pip install PyMuPDF")
     except Exception as e:
         logger.error(f"Failed to extract text from PDF: {str(e)}")
         raise
+
+raise ValueError(f"Unsupported file type: {ext}. Please upload PDF or DOCX.")
 
 
 # ==============================
@@ -247,45 +277,46 @@ def compute_learning_velocity(text: str) -> str:
     return "Low"
 
 
-def compute_role_match(resume_text: str, target_role: str, skills: List[str]) -> float:
+def compute_role_match(resume_text: str, target_role: str, skills: List[str],
+                       job_description: str = "") -> float:
     """
-    Smart hybrid role matching using:
-    - Semantic TF-IDF similarity
-    - Skill overlap boost
-    - Keyword matching
+    Role-Specific Suitability and Matching Analysis (paper §IV.E).
+    If a full job description is provided, matches against that instead of
+    just the role name — much richer signal.
+    Uses TF-IDF cosine similarity + skill overlap boost.
+    """
+    # Use JD if provided, otherwise fall back to role name
+    match_target = job_description.strip() if job_description and job_description.strip() else target_role
 
-    Returns: Score between 0-100
-    """
-    if not target_role or not target_role.strip():
-        return 50.0  # Neutral score when no role specified
+    if not match_target:
+        return 50.0
 
     try:
-        # Semantic similarity using TF-IDF
-        corpus = [resume_text, target_role.lower()]
+        corpus = [resume_text, match_target.lower()]
         vectorizer = TfidfVectorizer(
             stop_words='english',
-            max_features=100,
-            ngram_range=(1, 2)  # Consider bigrams too
+            max_features=200,
+            ngram_range=(1, 2)
         )
         tfidf_matrix = vectorizer.fit_transform(corpus)
-
         semantic_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0] * 100
-
     except Exception as e:
         logger.warning(f"TF-IDF computation failed: {e}")
-        semantic_score = 30.0  # Safe fallback
+        semantic_score = 30.0
 
-    # Skill overlap bonus
-    role_words = set(target_role.lower().split())
+    # Skill overlap — check skills against JD words
+    jd_words = set(match_target.lower().split())
     resume_skills = set(skills)
-    skill_overlap = len(role_words.intersection(resume_skills))
-    skill_bonus = min(25, skill_overlap * 8)  # Max 25 point bonus
+    skill_overlap = sum(1 for s in resume_skills if any(w in s for w in jd_words))
+    skill_bonus = min(30, skill_overlap * 8)
 
-    # Weighted final score
-    # 60% semantic, 40% skill match
-    final_score = (0.6 * semantic_score) + (0.4 * (50 + skill_bonus))
+    # If full JD given: 70% semantic (richer signal), 30% skill
+    # If just role name: 60% semantic, 40% skill
+    if job_description and job_description.strip():
+        final_score = (0.70 * semantic_score) + (0.30 * (50 + skill_bonus))
+    else:
+        final_score = (0.60 * semantic_score) + (0.40 * (50 + skill_bonus))
 
-    # Ensure score is within bounds
     return round(min(100, max(0, final_score)), 2)
 
 
@@ -437,7 +468,7 @@ def generate_career_trajectory(skills: List[str], learning_velocity: str,
 # ✅ MAIN ANALYSIS FUNCTION
 # ==============================
 
-def analyze_resume(file_path: str, target_role: str = "") -> Dict:
+def analyze_resume(file_path: str, target_role: str = "", job_description: str = "") -> Dict:
     """
     Main function to analyze a resume PDF and extract comprehensive insights.
 
@@ -471,7 +502,7 @@ def analyze_resume(file_path: str, target_role: str = "") -> Dict:
         education = extract_education(text_lower)
 
         # Compute role matching scores
-        role_score = compute_role_match(text_lower, target_role, skills)
+        role_score = compute_role_match(text_lower, target_role, skills, job_description)
         final_fit = compute_final_fit(role_score)
 
         # Compute additional scores
@@ -493,8 +524,9 @@ def analyze_resume(file_path: str, target_role: str = "") -> Dict:
         missing_skills = [s for s in SKILL_KEYWORDS[:50] if s not in skills][:8]
 
         # Generate explainability text
+        jd_note = " Matched against full job description." if job_description and job_description.strip() else ""
         explainability = (
-            f"Matched {len(skills)} key skills with {role_score}% role relevance. "
+            f"Matched {len(skills)} key skills with {role_score}% role relevance.{jd_note} "
             f"Profile shows {learning_velocity.lower()} learning velocity with "
             f"{experience_years:.1f} years of experience."
         )
