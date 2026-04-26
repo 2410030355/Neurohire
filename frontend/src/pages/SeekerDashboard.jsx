@@ -6,6 +6,7 @@ import MockInterviewPanel from '@/components/seeker/MockInterviewPanel';
 import JobBoard from '@/components/seeker/JobBoard';
 import ProjectQA from '@/components/seeker/ProjectQA';
 import SeekerProfileDropdown from '@/components/seeker/SeekerProfileDropdown';
+import Chatbot from '@/components/shared/Chatbot';
 
 export default function SeekerDashboard() {
   const [activeTab, setActiveTab] = useState('resume');
@@ -91,6 +92,9 @@ export default function SeekerDashboard() {
           </div>
         </div>
       </main>
+
+      {/* ── Chatbot ── */}
+      <Chatbot />
     </div>
   );
 }

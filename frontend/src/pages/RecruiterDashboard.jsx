@@ -15,6 +15,7 @@ import ScheduleModal from '@/components/recruiter/ScheduleModal';
 import EmptyState from '@/components/shared/EmptyState';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
 import RecruiterProfileDropdown from '@/components/recruiter/RecruiterProfileDropdown';
+import Chatbot from '@/components/shared/Chatbot';
 
 export default function RecruiterDashboard() {
   const [activeTab, setActiveTab] = useState('analysis');
@@ -57,7 +58,7 @@ export default function RecruiterDashboard() {
           className="sticky top-0 z-10 flex items-center justify-end gap-3 px-6 py-3 backdrop-blur border-b"
           style={{ background: 'var(--nh-glass)', borderColor: 'var(--nh-border)' }}
         >
-        <RecruiterProfileDropdown />
+          <RecruiterProfileDropdown />
         </div>
 
         <div className="flex-1 p-6 md:p-8">
@@ -173,6 +174,9 @@ export default function RecruiterDashboard() {
           />
         )}
       </AnimatePresence>
+
+      {/* ── Chatbot ── */}
+      <Chatbot />
     </div>
   );
 }
