@@ -88,22 +88,33 @@ def _get_user_role(user):
 
 def _user_payload(user):
     """Return a minimal user dict for API responses, including role."""
-    # For Google OAuth users, first_name + last_name are set
-    # For email users, full_name may be stored in first_name
-    full_name = (
-        f"{user.first_name} {user.last_name}".strip()
-        or user.first_name
-        or user.username
-        or user.email.split('@')[0]
-    )
+    # Guard FIRST before accessing any user fields
     if not user or not user.is_authenticated:
         return None
+
+    # Build full name — try every possible source
+    first = (user.first_name or '').strip()
+    last  = (user.last_name  or '').strip()
+    full_name = (
+        f"{first} {last}".strip()           # Google OAuth sets both
+        or first                             # email signup sets first_name
+        or user.username                     # fallback to username
+        or user.email.split('@')[0]          # last resort: email prefix
+    )
+
+    # Clean up email-style names like "john.doe123" → "John Doe"
+    if full_name and ('@' not in full_name) and ('.' in full_name or '_' in full_name):
+        clean = full_name.replace('.', ' ').replace('_', ' ')
+        parts = [p for p in clean.split() if p and not p.isdigit()]
+        if parts:
+            full_name = ' '.join(p.capitalize() for p in parts)
+
     return {
-        "id": user.pk,
-        "email": getattr(user, "email", None) or user.username,
-        "username": user.username,
+        "id":        user.pk,
+        "email":     getattr(user, "email", None) or user.username,
+        "username":  user.username,
         "full_name": full_name,
-        "role": _get_user_role(user),
+        "role":      _get_user_role(user),
     }
 
 

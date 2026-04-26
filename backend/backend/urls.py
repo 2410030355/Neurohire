@@ -36,7 +36,7 @@ router.register(r"mock-interviews", MockInterviewViewSet)
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include(router.urls)),
-    path("api/upload-resume/", ResumeUploadView.as_view()),
+    path("api/upload-resume/", csrf_exempt(ResumeUploadView.as_view())),
     path("api/github-search/", GitHubSearchView.as_view()),
     path("api/project-qa/", ProjectQAView.as_view()),
     path("api/mock-interview/start/", MockInterviewStartView.as_view()),
@@ -48,9 +48,9 @@ urlpatterns = [
     path("api/auth/logout/", LogoutView.as_view()),
     path("api/candidates/clear/", clear_candidates),
     path("api/resume-improvement/", SeekerResumeView.as_view()),
-    path("api/seeker-resume/", SeekerResumeView.as_view()),
-    path("api/upload-file/", ResumeUploadView.as_view()),
-    path("api/auth/profile/", ProfileUpdateView.as_view()),
-    path("api/chatbot/", ChatbotView.as_view()),
+    path("api/seeker-resume/", csrf_exempt(SeekerResumeView.as_view())),
+    path("api/upload-file/", csrf_exempt(ResumeUploadView.as_view())),
+    path("api/auth/profile/", csrf_exempt(ProfileUpdateView.as_view())),
+    path("api/chatbot/", csrf_exempt(ChatbotView.as_view())),
     path("auth/", include("social_django.urls", namespace="social")),
 ]

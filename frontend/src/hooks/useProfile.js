@@ -1,16 +1,18 @@
 /**
- * useProfile — shared hook for both RecruiterProfileDropdown and SeekerProfileDropdown
- * Fetches user from /api/auth/profile/ (richer than /me/),
- * extracts name from email if full_name is missing,
- * and exposes save() to update profile details.
+ * useProfile — shared hook for RecruiterProfileDropdown and SeekerProfileDropdown
+ *
+ * Flow:
+ * 1. Read cached user from localStorage immediately (instant display)
+ * 2. Fetch fresh data from /api/auth/profile/ in background
+ * 3. If name is missing, derive it from email
+ * 4. saveProfile() PATCHes /api/auth/profile/ and updates localStorage
  */
 import { useState, useEffect } from 'react';
-import { jsonFetch } from '@/api/http';
+import { API_BASE_URL } from '@/api/http';
 
 export function extractNameFromEmail(email = '') {
   if (!email) return '';
   const local = email.split('@')[0];
-  // Convert "john.doe" or "john_doe" or "johndoe123" → "John Doe" / "John"
   return local
     .replace(/[._\-]/g, ' ')
     .replace(/\d+/g, '')
@@ -21,68 +23,80 @@ export function extractNameFromEmail(email = '') {
     .join(' ') || local;
 }
 
+async function apiFetch(path, options = {}) {
+  const url = `${API_BASE_URL}${path}`;
+  console.log(`[useProfile] ${options.method || 'GET'} ${url}`);
+  const res = await fetch(url, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  console.log(`[useProfile] ${path} → ${res.status}`);
+  const text = await res.text();
+  try { return { ok: res.ok, status: res.status, data: JSON.parse(text) }; }
+  catch { return { ok: res.ok, status: res.status, data: text }; }
+}
+
 export function useProfile() {
-  const [user, setUser]       = useState(() => {
+  const [user,   setUser]   = useState(() => {
     try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; }
   });
-  const [saving, setSaving]   = useState(false);
-  const [error,  setError]    = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
 
   useEffect(() => {
-    jsonFetch('/api/auth/profile/')
-      .then(data => {
-        if (!data?.email) return;
-        // If full_name is empty, derive from email
-        if (!data.full_name?.trim()) {
-          data.full_name = extractNameFromEmail(data.email);
-        }
-        setUser(data);
-        localStorage.setItem('user', JSON.stringify(data));
-      })
-      .catch(() => {
-        const stored = localStorage.getItem('user');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (!parsed.full_name?.trim()) {
-            parsed.full_name = extractNameFromEmail(parsed.email);
-          }
-          setUser(parsed);
-        }
-      });
+    apiFetch('/api/auth/me/').then(({ ok, data }) => {
+      if (!ok || !data?.email) {
+        console.warn('[useProfile] /me/ failed or no email — using localStorage');
+        return;
+      }
+      // Derive name from email if backend returned blank full_name
+      if (!data.full_name?.trim()) {
+        data.full_name = extractNameFromEmail(data.email);
+      }
+      setUser(data);
+      localStorage.setItem('user', JSON.stringify(data));
+    }).catch(e => {
+      console.warn('[useProfile] /me/ fetch error:', e.message);
+    });
   }, []);
 
   const saveProfile = async (updates) => {
     setSaving(true);
     setError('');
     try {
-      const data = await jsonFetch('/api/auth/profile/', {
+      const { ok, data } = await apiFetch('/api/auth/profile/', {
         method: 'PATCH',
         body: JSON.stringify(updates),
       });
+      if (!ok) throw new Error(data?.error || 'Save failed');
       if (!data.full_name?.trim()) data.full_name = extractNameFromEmail(data.email);
       setUser(data);
       localStorage.setItem('user', JSON.stringify(data));
       return true;
     } catch (e) {
-      setError(e.message || 'Failed to save');
+      setError(e.message);
       return false;
     } finally {
       setSaving(false);
     }
   };
 
+  // displayName never shows "User" — always at least email prefix
   const displayName = (
     user?.full_name?.trim() ||
     extractNameFromEmail(user?.email) ||
+    user?.username ||
     'User'
   );
 
   const initials = displayName
     .split(' ')
+    .filter(Boolean)
     .map(n => n[0])
     .join('')
     .toUpperCase()
-    .slice(0, 2) || 'U';
+    .slice(0, 2) || '?';
 
   return { user, displayName, initials, saving, error, saveProfile };
 }
