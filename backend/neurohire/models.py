@@ -1,7 +1,5 @@
 from django.db import models
-from django.contrib.auth import get_user_model
-
-User = get_user_model()
+from django.contrib.auth.models import User
 
 
 # ===============================
@@ -66,43 +64,34 @@ MOCK_STATUS_CHOICES = [
     ("completed", "Completed"),
 ]
 
-ROLE_CHOICES = [
-    ("recruiter", "Recruiter"),
-    ("jobseeker", "Job Seeker"),
-]
-
 
 # ===============================
-# 👤 USER PROFILE (Role + Auth)
+# 👤 USER PROFILE
 # ===============================
 
 class UserProfile(models.Model):
-    """
-    Extends Django's built-in User with role information.
-    One-to-one with the default User model.
-    """
-    user = models.OneToOneField(
-        User,
-        on_delete=models.CASCADE,
-        related_name="profile",
-    )
-    role = models.CharField(
-        max_length=20,
-        choices=ROLE_CHOICES,
-        default="jobseeker",
-    )
+    ROLE_CHOICES = [
+        ("recruiter",  "Recruiter"),
+        ("jobseeker",  "Job Seeker"),
+    ]
+
+    user      = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    role      = models.CharField(max_length=20, choices=ROLE_CHOICES, default="jobseeker")
+
+    # Extra profile fields — editable from the profile dropdown
+    phone     = models.CharField(max_length=30,  blank=True, default="")
+    company   = models.CharField(max_length=255, blank=True, default="")   # recruiters
+    college   = models.CharField(max_length=255, blank=True, default="")   # seekers
+    bio       = models.TextField(blank=True, default="")
+    linkedin  = models.CharField(max_length=255, blank=True, default="")
+    location  = models.CharField(max_length=255, blank=True, default="")
+    job_title = models.CharField(max_length=255, blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user.email} ({self.role})"
-
-    @property
-    def is_recruiter(self):
-        return self.role == "recruiter"
-
-    @property
-    def is_jobseeker(self):
-        return self.role == "jobseeker"
+        return f"{self.user.email} — {self.role}"
 
 
 # ===============================
@@ -229,6 +218,7 @@ class AIDecisionLog(models.Model):
     reason = models.TextField(blank=True, null=True)
     is_agreement = models.BooleanField(default=False)
 
+    role_match_score = models.FloatField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
