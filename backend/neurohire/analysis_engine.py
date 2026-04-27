@@ -106,39 +106,35 @@ def extract_text_from_pdf(file_path: str) -> Tuple[str, str]:
                     for cell in row.cells:
                         if cell.text.strip():
                             paragraphs.append(cell.text)
-            text = "
+            text = "\n".join(paragraphs)
+            if not text.strip():
+                raise ValueError("DOCX contains no extractable text")
+            return text.lower(), text
+        except ImportError:
+            raise ValueError("python-docx not installed. Run: pip install python-docx")
+        except Exception as e:
+            logger.error(f"Failed to extract text from DOCX: {str(e)}")
+            raise
 
+    # ── PDF handling ───────────────────────────────────────────────
+    if ext == '.pdf':
+        try:
+            import fitz as pymupdf
+            text = ""
+            doc = pymupdf.open(file_path)
+            for page in doc:
+                text += page.get_text()
+            doc.close()
+            if not text.strip():
+                raise ValueError("PDF contains no extractable text (may be scanned image)")
+            return text.lower(), text
+        except ImportError:
+            raise ValueError("PyMuPDF not installed. Run: pip install PyMuPDF")
+        except Exception as e:
+            logger.error(f"Failed to extract text from PDF: {str(e)}")
+            raise
 
-".join(paragraphs)
-if not text.strip():
-    raise ValueError("DOCX contains no extractable text")
-return text.lower(), text
-except ImportError:
-raise ValueError("python-docx not installed. Run: pip install python-docx")
-except Exception as e:
-logger.error(f"Failed to extract text from DOCX: {str(e)}")
-raise
-
-# ── PDF handling ───────────────────────────────────────────────
-if ext == '.pdf':
-    try:
-        import fitz as pymupdf
-
-        text = ""
-        doc = pymupdf.open(file_path)
-        for page in doc:
-            text += page.get_text()
-        doc.close()
-        if not text.strip():
-            raise ValueError("PDF contains no extractable text (may be scanned image)")
-        return text.lower(), text
-    except ImportError:
-        raise ValueError("PyMuPDF not installed. Run: pip install PyMuPDF")
-    except Exception as e:
-        logger.error(f"Failed to extract text from PDF: {str(e)}")
-        raise
-
-raise ValueError(f"Unsupported file type: {ext}. Please upload PDF or DOCX.")
+    raise ValueError(f"Unsupported file type: {ext}. Please upload PDF or DOCX.")
 
 
 # ==============================
