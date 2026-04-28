@@ -437,27 +437,36 @@ class SeekerResumeView(APIView):
         strength_score = analysis.get('resume_strength_score', 0)
         readiness = round((role_score * 0.5) + (strength_score * 0.5))
 
+        # Compute role_fit label from role_score
+        if role_score >= 70:
+            role_fit = 'High'
+        elif role_score >= 40:
+            role_fit = 'Medium'
+        else:
+            role_fit = 'Low'
+
         return Response({
             # Personal info
-            'name': analysis.get('name', 'You'),
-            'target_role': target_role,
+            'name':                  analysis.get('name', 'You'),
+            'target_role':           target_role,
 
-            # Seeker-friendly scores
-            'readiness_score': readiness,
-            'resume_strength': round(strength_score),
-            'role_alignment': round(role_score),
-            'learning_velocity': analysis.get('learning_velocity', 'Medium'),
-            'experience_years': analysis.get('experience_years', 0),
-            'education': analysis.get('education', ''),
+            # Scores — named to match ResumeImprover.jsx exactly
+            'resume_strength_score': round(strength_score),   # was 'resume_strength'
+            'readiness_score':       readiness,
+            'role_alignment':        round(role_score),
+            'final_fit':             role_fit,                 # for FitBadge
+            'learning_velocity':     analysis.get('learning_velocity', 'Medium'),
+            'experience_years':      analysis.get('experience_years', 0),
+            'education':             analysis.get('education', ''),
 
-            # Skills
-            'current_skills': analysis.get('skills', []),
-            'skill_gaps': skill_gaps,
+            # Skills — named to match ResumeImprover.jsx exactly
+            'skills':                analysis.get('skills', []),          # was 'current_skills'
+            'missing_skills':        skill_gaps,                          # was 'skill_gaps'
 
-            # Actionable feedback
-            'strengths': strengths,
-            'improvement_tips': improvement_tips,
-            'career_summary': analysis.get('career_trajectory', ''),
+            # Feedback — named to match ResumeImprover.jsx exactly
+            'strengths':             strengths,
+            'improvement_suggestions': improvement_tips,                  # was 'improvement_tips'
+            'summary':               analysis.get('career_trajectory', ''), # was 'career_summary'
         }, status=status.HTTP_200_OK)
 
 
@@ -1706,58 +1715,136 @@ def _chatbot_classify(msg):
     return best if scores[best] > 0 else 'general'
 
 def _chatbot_reply(intent, message):
+    q = message.lower()
+
     if intent == 'candidates':
         try:
             db = _get_db()
-            q = message.lower()
-            if 'how many' in q or 'count' in q or 'total' in q:
-                total = db.candidates.count_documents({})
-                high  = db.candidates.count_documents({'final_fit': 'High'})
-                return f"There are **{total}** candidates in the system, of which **{high}** are rated High fit."
-            skill_m = re.search(r'(?:with|skilled in|know|has)\s+([a-zA-Z+#.]+)', q)
-            if skill_m:
-                skill = skill_m.group(1)
-                cs = list(db.candidates.find({'skills':{'$regex':skill,'$options':'i'}},{'name':1,'final_fit':1,'_id':0}).limit(5))
-                if not cs: return f"No candidates with **{skill}** found yet."
-                return "Candidates with **{}**: {}.".format(skill, ', '.join(c['name'] for c in cs))
-            cs = list(db.candidates.find({},{'name':1,'role_match_score':1,'final_fit':1,'_id':0}).sort('role_match_score',-1).limit(5))
-            if not cs: return "No candidates analyzed yet. Upload resumes in the Resume Analysis tab."
-            lines = ["• {} — {} fit ({:.0f}%)".format(c['name'],c.get('final_fit','?'),c.get('role_match_score',0)) for c in cs]
+            if any(w in q for w in ['how many', 'count', 'total', 'number of']):
+                total  = db.candidates.count_documents({})
+                high   = db.candidates.count_documents({'final_fit': 'High'})
+                medium = db.candidates.count_documents({'final_fit': 'Medium'})
+                low    = db.candidates.count_documents({'final_fit': 'Low'})
+                return (f"There are **{total}** candidates in the system.\n"
+                        f"- High fit: {high}\n- Medium fit: {medium}\n- Low fit: {low}")
+
+            skill_pattern = re.search(
+                r'(?:with|skilled in|know|knows|has|using|who know)\s+([a-zA-Z+#.\s]{2,20}?)(?:\s|$|\?)',
+                q
+            )
+            if skill_pattern:
+                skill = skill_pattern.group(1).strip()
+                cs = list(db.candidates.find(
+                    {'skills': {'$regex': skill, '$options': 'i'}},
+                    {'name': 1, 'final_fit': 1, 'role_match_score': 1, '_id': 0}
+                ).limit(5))
+                if not cs:
+                    return f"No candidates with **{skill}** found yet."
+                lines = [f"- {c['name']} ({c.get('final_fit','?')} fit)" for c in cs]
+                return f"Candidates with **{skill}**:\n" + "\n".join(lines)
+
+            if any(w in q for w in ['high fit', 'high-fit', 'best fit', 'top fit']):
+                cs = list(db.candidates.find(
+                    {'final_fit': 'High'},
+                    {'name': 1, 'role_match_score': 1, '_id': 0}
+                ).sort('role_match_score', -1).limit(5))
+                if not cs:
+                    return "No High fit candidates yet."
+                lines = [f"- {c['name']} ({c.get('role_match_score',0):.0f}% match)" for c in cs]
+                return "High fit candidates:\n" + "\n".join(lines)
+
+            cs = list(db.candidates.find(
+                {}, {'name': 1, 'role_match_score': 1, 'final_fit': 1, '_id': 0}
+            ).sort('role_match_score', -1).limit(5))
+            if not cs:
+                return "No candidates analyzed yet. Upload resumes in the Resume Analysis tab."
+            lines = [f"- {c['name']} - {c.get('final_fit','?')} fit ({c.get('role_match_score',0):.0f}%)" for c in cs]
             return "Top candidates:\n" + "\n".join(lines)
         except Exception as e:
-            return f"Couldn't fetch candidate data: {e}"
+            return f"Could not fetch candidate data. Error: {str(e)[:80]}"
 
     if intent == 'analytics':
-        return ("**HAAR** = Human-AI Agreement Rate\n"
-                "**CDR** = Consistency Defect Rate\n"
-                "**SVC** = Skill Validation Coverage\n"
-                "**LVS** = Learning Velocity Score\n"
-                "See the AI Analytics tab for live values.")
+        if 'haar' in q:
+            return ("**HAAR (Human-AI Agreement Rate)** - how often recruiters agree with the AI.\n"
+                    "High HAAR = AI is well-calibrated. Low HAAR = frequent overrides.")
+        if 'cdr' in q:
+            return ("**CDR (Consistency Defect Rate)** - percentage of candidates with contradictions.\n"
+                    "Example: senior skills claimed with under 1 year experience.")
+        if 'svc' in q:
+            return ("**SVC (Skill Validation Coverage)** - percentage of candidates with project-backed skills.\n"
+                    "Measures how many candidates have verifiable skills vs keyword stuffing.")
+        if 'lvs' in q:
+            return ("**LVS (Learning Velocity Score)** - percentage of candidates rated High fit.\n"
+                    "Reflects the overall quality of your candidate pool.")
+        if 'fairness' in q or 'bias' in q:
+            return ("Fairness analysis compares match scores of hired vs rejected candidates.\n"
+                    "A large gap may indicate non-merit factors influencing decisions.")
+        return ("NeuroHire tracks 4 key metrics:\n"
+                "- **HAAR** - Human-AI Agreement Rate\n"
+                "- **CDR** - Consistency Defect Rate\n"
+                "- **SVC** - Skill Validation Coverage\n"
+                "- **LVS** - Learning Velocity Score\n"
+                "Ask about any specific metric for details.")
 
     if intent == 'platform':
-        q = message.lower()
-        if 'skill' in q:
-            return "Skills are validated by scanning a 120-char window for action verbs (built/deployed/implemented). Result: Valid, Partial, or Unverified."
-        if 'score' in q or 'match' in q:
-            return "Role match uses TF-IDF cosine similarity between resume and job description, combined with skill and consistency scores."
-        if 'upload' in q:
-            return "You can upload PDF or DOCX resumes. The system auto-extracts skills, experience, education, and projects."
+        if any(w in q for w in ['skill', 'valid', 'verif']):
+            return ("Skill validation scans a 120-char window around each skill for action verbs.\n"
+                    "built / deployed / implemented = **Valid**\n"
+                    "Mentioned multiple times without evidence = **Partial**\n"
+                    "No context at all = **Unverified**")
+        if any(w in q for w in ['score', 'match', 'fit']):
+            return ("Role match uses TF-IDF cosine similarity between resume and job description.\n"
+                    "Combined with skill validation + consistency + learning velocity.\n"
+                    "High = 70+, Medium = 40-69, Low = below 40.")
+        if 'consistency' in q:
+            return ("Consistency checks for contradictions:\n"
+                    "- Senior skills with under 1.5 years experience\n"
+                    "- Too many skills for experience level\n"
+                    "- Advanced tools without foundational skills\n"
+                    "Each issue deducts from a 100-point score.")
+        if any(w in q for w in ['upload', 'pdf', 'docx']):
+            return ("NeuroHire supports PDF and DOCX uploads.\n"
+                    "PDFs parsed with PyMuPDF, DOCX with python-docx.\n"
+                    "Extracts: name, email, skills, experience, education, projects.")
+        if any(w in q for w in ['github', 'talent', 'search']):
+            return ("Talent Search fetches GitHub profiles by role keyword.\n"
+                    "Runs the same AI analysis pipeline on each profile.\n"
+                    "Includes skill validation, consistency, and role fit.")
+        if any(w in q for w in ['mock', 'interview']):
+            return ("Mock Interview generates role-specific questions.\n"
+                    "AI scores confidence, clarity, and technical accuracy.\n"
+                    "Flags filler words and gives improvement tips.")
+        if any(w in q for w in ['mongodb', 'database']):
+            return ("Dual-database architecture:\n"
+                    "- **SQLite** for auth, sessions, interviews (structured)\n"
+                    "- **MongoDB Atlas** for candidate profiles (flexible, schema-free)\n"
+                    "MongoDB handles the varying structure of different resumes.")
         return ("NeuroHire has two modules:\n"
-                "• **Recruiter**: upload resumes, search GitHub, analyze candidates, track decisions\n"
-                "• **Seeker**: analyze resume, mock interviews, job board, project Q&A")
+                "- **Recruiter**: upload resumes, search GitHub, analyze, track decisions\n"
+                "- **Seeker**: improve resume, mock interviews, job board, project Q&A\n"
+                "Ask about any specific feature.")
 
     if intent == 'jobs':
-        return "Job listings come from the Remotive API. Browse them in the Job Board tab in the Seeker Dashboard."
+        return ("Job Board fetches live listings from the Remotive API.\n"
+                "Browse in the Job Board tab - Seeker Dashboard.\n"
+                "Click any card to see details and apply.")
 
     if intent == 'waitlist':
-        return "Add candidates to waitlist from their card. View scheduled interviews in the Scheduled tab."
+        if any(w in q for w in ['schedule', 'interview']):
+            return ("Click Schedule on any candidate card to book an interview.\n"
+                    "Set date, time, and meeting link.\n"
+                    "View all scheduled interviews in the Scheduled tab.")
+        return ("Waitlist holds candidates under consideration.\n"
+                "Add from any candidate card in Resume Analysis or Talent Search.\n"
+                "Manage from the Waitlist tab.")
 
     return ("I can help with:\n"
-            "• Candidates — scores, skills, fit\n"
-            "• Analytics — HAAR, CDR, SVC, LVS\n"
-            "• Platform — how features work\n"
-            "• Jobs & Waitlist\n\n"
-            "Try: *'Show top candidates'* or *'How does skill validation work?'*")
+            "- **Candidates** - scores, skills, top candidates\n"
+            "- **Analytics** - HAAR, CDR, SVC, LVS\n"
+            "- **Platform** - how any feature works\n"
+            "- **Jobs** - job board\n"
+            "- **Waitlist** - scheduling\n\n"
+            "Try: 'Show top candidates' or 'What is HAAR?'")
 
 
 class ChatbotView(APIView):
