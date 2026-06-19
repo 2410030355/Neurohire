@@ -1699,169 +1699,445 @@ class LoginView(APIView):
         return Response(_user_payload(user))
 
 
-# ── Chatbot ─────────────────────────────────────────────────────────────────
+# ── Chatbot ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# CHATBOT — MongoDB-powered with aggregation pipelines + session history
+# ════════════════════════════════════════════════════════════════════════════
+import re as _re
+from datetime import datetime as _dt
+
 CHATBOT_INTENTS = {
-    'candidates': ['candidate','resume','applicant','profile','skill','fit','score','top','best','how many'],
-    'jobs':       ['job','role','position','opening','vacancy','hiring'],
-    'platform':   ['how','what','neurohire','feature','work','use','help','explain'],
-    'analytics':  ['haar','cdr','svc','lvs','metric','analytic','agreement','disagreement','fairness'],
-    'waitlist':   ['waitlist','scheduled','interview','schedule'],
+    'candidates': [
+        'candidate','resume','applicant','profile','skill','fit','score',
+        'top','best','how many','show me','list','high','medium','low',
+        'experience','years','from','who','find','search','filter',
+    ],
+    'jobs':       ['job','role','position','opening','vacancy','hiring','remotive'],
+    'platform':   ['how','what','neurohire','feature','work','use','help',
+                   'explain','upload','pdf','docx','github','talent','mock',
+                   'interview','consistency','validation','velocity','mongodb',
+                   'database','architecture','score','match','fit'],
+    'analytics':  ['haar','cdr','svc','lvs','metric','analytic','agreement',
+                   'disagreement','fairness','bias','feedback','log','decision'],
+    'waitlist':   ['waitlist','scheduled','schedule','book','interview'],
+    'seeker':     ['improve','my resume','my score','my skills','recommend',
+                   'suggest','tips','gap','missing','learn','grow'],
 }
+
+FOLLOW_UPS = {
+    'candidates': [
+        'Show top 5 candidates',
+        'How many high fit candidates?',
+        'Show candidates with Python',
+        'Filter by 3+ years experience',
+    ],
+    'analytics': [
+        'What is HAAR?',
+        'Explain CDR',
+        'Show fairness analysis',
+        'What is learning velocity?',
+    ],
+    'platform': [
+        'How does skill validation work?',
+        'How is role match calculated?',
+        'What is consistency scoring?',
+        'How does MongoDB store candidates?',
+    ],
+    'jobs': [
+        'How do I apply for a job?',
+        'What is Remotive API?',
+        'How many jobs are available?',
+    ],
+    'waitlist': [
+        'How do I schedule an interview?',
+        'How do I add to waitlist?',
+        'View scheduled interviews',
+    ],
+    'seeker': [
+        'How can I improve my resume?',
+        'What skills am I missing?',
+        'How is my readiness score calculated?',
+    ],
+    'general': [
+        'Show top candidates',
+        'What is HAAR?',
+        'How does skill validation work?',
+        'How many candidates do we have?',
+    ],
+}
+
+def _get_session_id(request):
+    """Get or create a session ID for this user."""
+    if not request.session.session_key:
+        request.session.create()
+    return request.session.session_key or 'anonymous'
+
+
+def _save_message(db, session_id, role, text, intent=None):
+    """Save a single message to MongoDB chatbot_sessions collection."""
+    try:
+        db.chatbot_sessions.update_one(
+            {'session_id': session_id},
+            {
+                '$push': {
+                    'messages': {
+                        'role': role,
+                        'text': text,
+                        'intent': intent,
+                        'ts': _dt.utcnow(),
+                    }
+                },
+                '$set':  {'updated_at': _dt.utcnow()},
+                '$setOnInsert': {'created_at': _dt.utcnow()},
+            },
+            upsert=True,
+        )
+    except Exception:
+        pass
+
+
+def _get_history(db, session_id, limit=20):
+    """Retrieve last N messages for this session from MongoDB."""
+    try:
+        doc = db.chatbot_sessions.find_one({'session_id': session_id})
+        if doc and 'messages' in doc:
+            msgs = doc['messages'][-limit:]
+            return [{'role': m['role'], 'text': m['text']} for m in msgs]
+    except Exception:
+        pass
+    return []
+
 
 def _chatbot_classify(msg):
     msg = msg.lower()
-    scores = {k: sum(1 for w in v if w in msg) for k,v in CHATBOT_INTENTS.items()}
+    scores = {k: sum(1 for w in v if w in msg) for k, v in CHATBOT_INTENTS.items()}
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else 'general'
 
-def _chatbot_reply(intent, message):
+
+def _parse_experience_filter(q):
+    """Extract experience year filter from query. '3+ years' → 3"""
+    m = _re.search(r'(\d+)\s*\+?\s*years?', q)
+    return int(m.group(1)) if m else None
+
+
+def _parse_skill_filter(q):
+    """Extract skill name from query."""
+    patterns = [
+        r'(?:with|skilled in|know|knows|using|who know|who has|has)\s+([a-zA-Z+#.\s]{2,25}?)(?:\s+and|\s+or|\s+with|\s*$|\?)',
+        r'([a-zA-Z+#.]{2,20})\s+(?:developer|engineer|candidate|skill)',
+    ]
+    for pat in patterns:
+        m = _re.search(pat, q)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _build_candidate_pipeline(q):
+    """
+    Build MongoDB aggregation pipeline from natural language query.
+    Supports: skill filter, experience filter, fit filter, source filter.
+    """
+    pipeline_match = {}
+
+    skill = _parse_skill_filter(q)
+    if skill:
+        pipeline_match['skills'] = {'$regex': skill, '$options': 'i'}
+
+    exp = _parse_experience_filter(q)
+    if exp:
+        pipeline_match['experience_years'] = {'$gte': exp}
+
+    if any(w in q for w in ['high fit', 'high-fit', 'best fit']):
+        pipeline_match['final_fit'] = 'High'
+    elif 'medium fit' in q or 'medium-fit' in q:
+        pipeline_match['final_fit'] = 'Medium'
+    elif 'low fit' in q or 'low-fit' in q:
+        pipeline_match['final_fit'] = 'Low'
+
+    if 'github' in q:
+        pipeline_match['source'] = 'github_search'
+    elif 'upload' in q or 'resume upload' in q:
+        pipeline_match['source'] = 'resume_upload'
+
+    pipeline = [
+        {'$match': pipeline_match},
+        {'$sort': {'role_match_score': -1}},
+        {'$limit': 5},
+        {'$project': {
+            '_id': 0,
+            'name': 1,
+            'role_match_score': 1,
+            'final_fit': 1,
+            'skills': {'$slice': ['$skills', 4]},
+            'experience_years': 1,
+            'source': 1,
+        }},
+    ]
+    return pipeline, skill, exp
+
+
+def _chatbot_reply(intent, message, db):
     q = message.lower()
 
     if intent == 'candidates':
         try:
-            db = _get_db()
-            if any(w in q for w in ['how many', 'count', 'total', 'number of']):
-                total  = db.candidates.count_documents({})
-                high   = db.candidates.count_documents({'final_fit': 'High'})
-                medium = db.candidates.count_documents({'final_fit': 'Medium'})
-                low    = db.candidates.count_documents({'final_fit': 'Low'})
-                return (f"There are **{total}** candidates in the system.\n"
-                        f"- High fit: {high}\n- Medium fit: {medium}\n- Low fit: {low}")
+            NL = '\n'
+            if any(w in q for w in ['how many','count','total','number','stats','summary']):
+                pipeline = [
+                    {'$group': {'_id': '$final_fit','count': {'$sum': 1},'avg_score': {'$avg': '$role_match_score'}}},
+                    {'$sort': {'count': -1}},
+                ]
+                rows = list(db.candidates.aggregate(pipeline))
+                if not rows:
+                    return 'No candidates yet. Upload resumes to get started.', 'candidates'
+                total = sum(r['count'] for r in rows)
+                parts = ['- %s fit: %d candidates (avg %.0f%% match)' % (r['_id'] or 'Unknown', r['count'], r.get('avg_score') or 0) for r in rows]
+                return ('**%d candidates** in the system:' % total) + NL + NL.join(parts), 'candidates'
 
-            skill_pattern = re.search(
-                r'(?:with|skilled in|know|knows|has|using|who know)\s+([a-zA-Z+#.\s]{2,20}?)(?:\s|$|\?)',
-                q
-            )
-            if skill_pattern:
-                skill = skill_pattern.group(1).strip()
-                cs = list(db.candidates.find(
-                    {'skills': {'$regex': skill, '$options': 'i'}},
-                    {'name': 1, 'final_fit': 1, 'role_match_score': 1, '_id': 0}
-                ).limit(5))
-                if not cs:
-                    return f"No candidates with **{skill}** found yet."
-                lines = [f"- {c['name']} ({c.get('final_fit','?')} fit)" for c in cs]
-                return f"Candidates with **{skill}**:\n" + "\n".join(lines)
+            pipeline, skill, exp = _build_candidate_pipeline(q)
+            has_filter = bool(skill or exp or any(w in q for w in ['high fit','medium fit','low fit','github','upload']))
+            if has_filter:
+                rows = list(db.candidates.aggregate(pipeline))
+                if not rows:
+                    fd = []
+                    if skill: fd.append('**%s** skills' % skill)
+                    if exp:   fd.append('**%d+ years** exp' % exp)
+                    return 'No candidates found with %s.' % ' and '.join(fd), 'candidates'
+                parts = []
+                for c in rows:
+                    sp  = ', '.join((c.get('skills') or [])[:3]) or 'N/A'
+                    ev  = '%.0fyr' % c.get('experience_years',0) if c.get('experience_years') else ''
+                    parts.append('- **%s** - %s fit (%.0f%%) %s%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('role_match_score',0), ev, NL, sp))
+                fd2 = []
+                if skill: fd2.append('**%s**' % skill)
+                if exp:   fd2.append('**%d+ years**' % exp)
+                hdr = ('Candidates with %s:' % ' & '.join(fd2) + NL) if fd2 else ('Filtered candidates:' + NL)
+                return hdr + NL.join(parts), 'candidates'
 
-            if any(w in q for w in ['high fit', 'high-fit', 'best fit', 'top fit']):
-                cs = list(db.candidates.find(
-                    {'final_fit': 'High'},
-                    {'name': 1, 'role_match_score': 1, '_id': 0}
-                ).sort('role_match_score', -1).limit(5))
-                if not cs:
-                    return "No High fit candidates yet."
-                lines = [f"- {c['name']} ({c.get('role_match_score',0):.0f}% match)" for c in cs]
-                return "High fit candidates:\n" + "\n".join(lines)
-
-            cs = list(db.candidates.find(
-                {}, {'name': 1, 'role_match_score': 1, 'final_fit': 1, '_id': 0}
-            ).sort('role_match_score', -1).limit(5))
-            if not cs:
-                return "No candidates analyzed yet. Upload resumes in the Resume Analysis tab."
-            lines = [f"- {c['name']} - {c.get('final_fit','?')} fit ({c.get('role_match_score',0):.0f}%)" for c in cs]
-            return "Top candidates:\n" + "\n".join(lines)
+            rows = list(db.candidates.find({},{'name':1,'role_match_score':1,'final_fit':1,'skills':1,'experience_years':1,'_id':0}).sort('role_match_score',-1).limit(5))
+            if not rows:
+                return 'No candidates analyzed yet. Upload resumes in the Resume Analysis tab.', 'candidates'
+            parts = []
+            for c in rows:
+                sp = ', '.join((c.get('skills') or [])[:3]) or 'N/A'
+                parts.append('- **%s** - %s fit (%.0f%%)%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('role_match_score',0), NL, sp))
+            return '**Top candidates by role match:**' + NL + NL.join(parts), 'candidates'
         except Exception as e:
-            return f"Could not fetch candidate data. Error: {str(e)[:80]}"
+            return 'Could not fetch candidates. Error: %s' % str(e)[:80], 'candidates'
+
+    NL = '\n'
 
     if intent == 'analytics':
         if 'haar' in q:
-            return ("**HAAR (Human-AI Agreement Rate)** - how often recruiters agree with the AI.\n"
-                    "High HAAR = AI is well-calibrated. Low HAAR = frequent overrides.")
+            return ('**HAAR - Human-AI Agreement Rate**' + NL +
+                    'How often recruiters agree with the AI.' + NL + NL +
+                    '- High HAAR (75%+) = AI is well-calibrated' + NL +
+                    '- Low HAAR (<50%) = Frequent overrides, recalibration needed' + NL + NL +
+                    'Track live in the AI Analytics tab.'), 'analytics'
         if 'cdr' in q:
-            return ("**CDR (Consistency Defect Rate)** - percentage of candidates with contradictions.\n"
-                    "Example: senior skills claimed with under 1 year experience.")
+            return ('**CDR - Consistency Defect Rate**' + NL +
+                    'Percentage of candidates with profile contradictions.' + NL + NL +
+                    'Checks:' + NL +
+                    '- Senior skills + under 1.5yr experience' + NL +
+                    '- Too many skills for experience level' + NL +
+                    '- Advanced tools without foundational skills' + NL +
+                    '- High experience but very few skills'), 'analytics'
         if 'svc' in q:
-            return ("**SVC (Skill Validation Coverage)** - percentage of candidates with project-backed skills.\n"
-                    "Measures how many candidates have verifiable skills vs keyword stuffing.")
+            return ('**SVC - Skill Validation Coverage**' + NL +
+                    'Percentage of candidates with project-backed skills.' + NL + NL +
+                    'Valid skill = action verb nearby:' + NL +
+                    'built / deployed / implemented / designed / led'), 'analytics'
         if 'lvs' in q:
-            return ("**LVS (Learning Velocity Score)** - percentage of candidates rated High fit.\n"
-                    "Reflects the overall quality of your candidate pool.")
-        if 'fairness' in q or 'bias' in q:
-            return ("Fairness analysis compares match scores of hired vs rejected candidates.\n"
-                    "A large gap may indicate non-merit factors influencing decisions.")
-        return ("NeuroHire tracks 4 key metrics:\n"
-                "- **HAAR** - Human-AI Agreement Rate\n"
-                "- **CDR** - Consistency Defect Rate\n"
-                "- **SVC** - Skill Validation Coverage\n"
-                "- **LVS** - Learning Velocity Score\n"
-                "Ask about any specific metric for details.")
+            return ('**LVS - Learning Velocity Score**' + NL +
+                    'Percentage of candidates rated High fit by the AI.' + NL +
+                    'Reflects overall candidate pool quality.'), 'analytics'
+        if any(w in q for w in ['fairness','bias']):
+            return ('**Fairness-Aware Ranking**' + NL +
+                    'Compares match scores of hired vs rejected candidates.' + NL + NL +
+                    '- Large gap = possible non-merit factors' + NL +
+                    '- 25%+ difference between AI and recruiter hire rate triggers a warning'), 'analytics'
+        if any(w in q for w in ['feedback','learn','adapt']):
+            return ('**Feedback Loop**' + NL +
+                    'Every recruiter decision is logged.' + NL + NL +
+                    'System derives patterns:' + NL +
+                    '- Your average hire threshold' + NL +
+                    '- How often you agree vs override the AI' + NL +
+                    '- Whether you favour candidates the AI rejected'), 'analytics'
+        return ('**NeuroHire tracks 4 key metrics:**' + NL +
+                '- **HAAR** - Human-AI Agreement Rate' + NL +
+                '- **CDR** - Consistency Defect Rate' + NL +
+                '- **SVC** - Skill Validation Coverage' + NL +
+                '- **LVS** - Learning Velocity Score' + NL + NL +
+                'Ask about any metric for details.'), 'analytics'
 
     if intent == 'platform':
-        if any(w in q for w in ['skill', 'valid', 'verif']):
-            return ("Skill validation scans a 120-char window around each skill for action verbs.\n"
-                    "built / deployed / implemented = **Valid**\n"
-                    "Mentioned multiple times without evidence = **Partial**\n"
-                    "No context at all = **Unverified**")
-        if any(w in q for w in ['score', 'match', 'fit']):
-            return ("Role match uses TF-IDF cosine similarity between resume and job description.\n"
-                    "Combined with skill validation + consistency + learning velocity.\n"
-                    "High = 70+, Medium = 40-69, Low = below 40.")
+        if any(w in q for w in ['skill valid','verify skill','validation']):
+            return ('**Evidence-Backed Skill Validation**' + NL +
+                    'Scans 120-char window around each skill.' + NL + NL +
+                    '- **Valid** = action verb found (built, deployed, implemented)' + NL +
+                    '- **Partial** = skill appears multiple times, no action verb' + NL +
+                    '- **Unverified** = just listed, no evidence' + NL + NL +
+                    'Prevents keyword stuffing from inflating scores.'), 'platform'
+        if any(w in q for w in ['score','match','role match','fit score']):
+            return ('**Role Match Scoring**' + NL +
+                    'TF-IDF cosine similarity between resume and job description.' + NL + NL +
+                    '- High fit = 70%+' + NL +
+                    '- Medium fit = 40-69%' + NL +
+                    '- Low fit = below 40%' + NL + NL +
+                    'Paste a full JD for richer 200-feature bigram matching.'), 'platform'
         if 'consistency' in q:
-            return ("Consistency checks for contradictions:\n"
-                    "- Senior skills with under 1.5 years experience\n"
-                    "- Too many skills for experience level\n"
-                    "- Advanced tools without foundational skills\n"
-                    "Each issue deducts from a 100-point score.")
-        if any(w in q for w in ['upload', 'pdf', 'docx']):
-            return ("NeuroHire supports PDF and DOCX uploads.\n"
-                    "PDFs parsed with PyMuPDF, DOCX with python-docx.\n"
-                    "Extracts: name, email, skills, experience, education, projects.")
-        if any(w in q for w in ['github', 'talent', 'search']):
-            return ("Talent Search fetches GitHub profiles by role keyword.\n"
-                    "Runs the same AI analysis pipeline on each profile.\n"
-                    "Includes skill validation, consistency, and role fit.")
-        if any(w in q for w in ['mock', 'interview']):
-            return ("Mock Interview generates role-specific questions.\n"
-                    "AI scores confidence, clarity, and technical accuracy.\n"
-                    "Flags filler words and gives improvement tips.")
-        if any(w in q for w in ['mongodb', 'database']):
-            return ("Dual-database architecture:\n"
-                    "- **SQLite** for auth, sessions, interviews (structured)\n"
-                    "- **MongoDB Atlas** for candidate profiles (flexible, schema-free)\n"
-                    "MongoDB handles the varying structure of different resumes.")
-        return ("NeuroHire has two modules:\n"
-                "- **Recruiter**: upload resumes, search GitHub, analyze, track decisions\n"
-                "- **Seeker**: improve resume, mock interviews, job board, project Q&A\n"
-                "Ask about any specific feature.")
+            return ('**Consistency Scoring**' + NL +
+                    'Starts at 100, deducts for contradictions:' + NL + NL +
+                    '- Senior skills + under 1.5yr exp = -20 pts' + NL +
+                    '- Too many skills for experience = -12 pts' + NL +
+                    '- Advanced tools without foundations = -15 pts' + NL +
+                    '- High exp but very few skills = -18 pts' + NL + NL +
+                    'Score never drops below 30.'), 'platform'
+        if any(w in q for w in ['upload','pdf','docx','file']):
+            return ('**Resume Upload**' + NL +
+                    'Supports PDF and DOCX.' + NL + NL +
+                    '- PDF parsed with PyMuPDF' + NL +
+                    '- DOCX parsed with python-docx (includes table text)' + NL + NL +
+                    'Extracts: name, email, skills, experience, education, projects.' + NL +
+                    'Batch upload supported.'), 'platform'
+        if any(w in q for w in ['mongodb','database','storage','architecture']):
+            return ('**MongoDB Architecture**' + NL +
+                    'Dual-database design:' + NL + NL +
+                    '- **SQLite** = auth, sessions, interviews, waitlist' + NL +
+                    '- **MongoDB Atlas** = candidate profiles (schema-free)' + NL + NL +
+                    'Collections:' + NL +
+                    '- candidates = full analysis output' + NL +
+                    '- chatbot_sessions = conversation history per user' + NL +
+                    '- chatbot_logs = message analytics' + NL + NL +
+                    'Aggregation pipelines power candidate search.'), 'platform'
+        if any(w in q for w in ['github','talent']):
+            return ('**Talent Search (GitHub)**' + NL +
+                    'Searches GitHub profiles by role keyword.' + NL + NL +
+                    '- Fetches real GitHub users via GitHub API' + NL +
+                    '- Runs same NLP analysis pipeline' + NL +
+                    '- Returns skill validation, consistency, and role fit' + NL +
+                    '- Stored in MongoDB candidates collection'), 'platform'
+        if any(w in q for w in ['mock','interview practice']):
+            return ('**Mock Interview**' + NL +
+                    'Generates role-specific technical questions.' + NL + NL +
+                    '- Scores confidence, clarity, technical accuracy' + NL +
+                    '- Flags filler words (um, uh, like)' + NL +
+                    '- Tracks speaking pace' + NL +
+                    '- Gives improvement tips per answer'), 'platform'
+        if any(w in q for w in ['learning velocity','velocity']):
+            return ('**Learning Velocity**' + NL +
+                    'Measures growth language in the resume.' + NL + NL +
+                    'High velocity = built, launched, led, scaled, promoted' + NL + NL +
+                    '- High = 4+ growth indicators' + NL +
+                    '- Medium = 2-3' + NL +
+                    '- Low = 0-1'), 'platform'
+        return ('**NeuroHire Platform**' + NL + NL +
+                'Recruiter module:' + NL +
+                '- Resume Analysis with AI scoring' + NL +
+                '- GitHub Talent Search' + NL +
+                '- Decision logging and AI Analytics' + NL + NL +
+                'Seeker module:' + NL +
+                '- Resume Improvement Analyzer' + NL +
+                '- Mock Interview Practice' + NL +
+                '- Live Job Board' + NL +
+                '- Project Q&A Trainer' + NL + NL +
+                'Ask about any specific feature.'), 'platform'
+
+    if intent == 'seeker':
+        return ('**Resume Improvement Tips**' + NL + NL +
+                '- Add action verbs near skill mentions (built, deployed, implemented)' + NL +
+                '- Include measurable outcomes in project descriptions' + NL +
+                '- Paste a job description for precise role match scoring' + NL +
+                '- Readiness score = 50% role match + 50% resume strength'), 'seeker'
 
     if intent == 'jobs':
-        return ("Job Board fetches live listings from the Remotive API.\n"
-                "Browse in the Job Board tab - Seeker Dashboard.\n"
-                "Click any card to see details and apply.")
+        return ('**Job Board**' + NL +
+                'Live remote listings from the Remotive API.' + NL + NL +
+                '- Browse in the Job Board tab (Seeker Dashboard)' + NL +
+                '- Click any card to view details and apply' + NL +
+                '- Listings update automatically'), 'jobs'
 
     if intent == 'waitlist':
-        if any(w in q for w in ['schedule', 'interview']):
-            return ("Click Schedule on any candidate card to book an interview.\n"
-                    "Set date, time, and meeting link.\n"
-                    "View all scheduled interviews in the Scheduled tab.")
-        return ("Waitlist holds candidates under consideration.\n"
-                "Add from any candidate card in Resume Analysis or Talent Search.\n"
-                "Manage from the Waitlist tab.")
+        if any(w in q for w in ['schedule','book','interview']):
+            return ('**Scheduling an Interview**' + NL +
+                    '1. Find the candidate in Resume Analysis or Talent Search' + NL +
+                    '2. Click Schedule on their card' + NL +
+                    '3. Set date, time, and meeting link' + NL +
+                    '4. View all in the Scheduled tab'), 'waitlist'
+        return ('**Waitlist**' + NL +
+                'Holds candidates under consideration.' + NL + NL +
+                '- Add from any candidate card' + NL +
+                '- View and manage in the Waitlist tab' + NL +
+                '- Prioritise by fit score or manually'), 'waitlist'
 
-    return ("I can help with:\n"
-            "- **Candidates** - scores, skills, top candidates\n"
-            "- **Analytics** - HAAR, CDR, SVC, LVS\n"
-            "- **Platform** - how any feature works\n"
-            "- **Jobs** - job board\n"
-            "- **Waitlist** - scheduling\n\n"
-            "Try: 'Show top candidates' or 'What is HAAR?'")
+    return ('Hi! I am the NeuroHire assistant powered by MongoDB.' + NL + NL +
+            'I can help with:' + NL +
+            '- **Candidates** - search, filter, scores' + NL +
+            '- **Analytics** - HAAR, CDR, SVC, LVS' + NL +
+            '- **Platform** - how any feature works' + NL +
+            '- **Jobs** - job board' + NL +
+            '- **Resume tips** - for job seekers' + NL + NL +
+            'Try: "Show top candidates" or "What is HAAR?"'), 'general'
 
 
 class ChatbotView(APIView):
     permission_classes = []
     authentication_classes = []
 
+    def get(self, request):
+        """Return conversation history for this session from MongoDB."""
+        try:
+            db = _get_db()
+            if db is None:
+                return Response({'history': [], 'error': 'MongoDB unavailable'})
+            session_id = _get_session_id(request)
+            history = _get_history(db, session_id, limit=50)
+            return Response({'history': history, 'session_id': session_id})
+        except Exception as e:
+            return Response({'history': [], 'error': str(e)})
+
     def post(self, request):
+        """Process a chat message, save to MongoDB, return reply + follow-ups."""
         message = (request.data.get('message') or '').strip()[:500]
         if not message:
             return Response({'error': 'Message required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        db = _get_db()
+        session_id = _get_session_id(request)
+
+        # Save user message to MongoDB chatbot_sessions
+        if db is not None:
+            _save_message(db, session_id, 'user', message)
+
+        # Classify intent and build reply
         intent = _chatbot_classify(message)
-        reply  = _chatbot_reply(intent, message)
-        try:
-            _get_db().chatbot_logs.insert_one({'message': message, 'intent': intent})
-        except Exception:
-            pass
-        return Response({'reply': reply, 'intent': intent})
+        reply, reply_intent = _chatbot_reply(intent, message, db)
+
+        # Save bot reply to MongoDB chatbot_sessions
+        if db is not None:
+            _save_message(db, session_id, 'bot', reply, intent=reply_intent)
+            # Log to chatbot_logs for analytics
+            try:
+                db.chatbot_logs.insert_one({
+                    'session_id': session_id,
+                    'message': message,
+                    'intent': intent,
+                    'ts': _dt.utcnow(),
+                })
+            except Exception:
+                pass
+
+        # Return reply + context-aware follow-up suggestions
+        follow_ups = FOLLOW_UPS.get(reply_intent, FOLLOW_UPS['general'])
+
+        return Response({
+            'reply':      reply,
+            'intent':     reply_intent,
+            'follow_ups': follow_ups,
+            'session_id': session_id,
+        })
 
 
 class MeView(APIView):
