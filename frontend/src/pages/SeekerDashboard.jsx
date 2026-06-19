@@ -94,7 +94,7 @@ export default function SeekerDashboard() {
       </main>
 
       {/* ── Chatbot ── */}
-      <Chatbot />
+      <Chatbot role="jobseeker" />
     </div>
   );
 }

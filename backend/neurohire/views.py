@@ -1882,6 +1882,8 @@ def _chatbot_reply(intent, message, db):
     q = message.lower()
 
     if intent == 'candidates':
+        if db is None:
+            return 'Candidate data is temporarily unavailable (database connection issue). Please try again shortly.', 'candidates'
         try:
             NL = '\n'
             if any(w in q for w in ['how many','count','total','number','stats','summary']):
@@ -2100,44 +2102,64 @@ class ChatbotView(APIView):
 
     def post(self, request):
         """Process a chat message, save to MongoDB, return reply + follow-ups."""
-        message = (request.data.get('message') or '').strip()[:500]
-        if not message:
-            return Response({'error': 'Message required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            message = (request.data.get('message') or '').strip()[:500]
+            if not message:
+                return Response({'error': 'Message required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        db = _get_db()
-        session_id = _get_session_id(request)
-
-        # Save user message to MongoDB chatbot_sessions
-        if db is not None:
-            _save_message(db, session_id, 'user', message)
-
-        # Classify intent and build reply
-        intent = _chatbot_classify(message)
-        reply, reply_intent = _chatbot_reply(intent, message, db)
-
-        # Save bot reply to MongoDB chatbot_sessions
-        if db is not None:
-            _save_message(db, session_id, 'bot', reply, intent=reply_intent)
-            # Log to chatbot_logs for analytics
             try:
-                db.chatbot_logs.insert_one({
-                    'session_id': session_id,
-                    'message': message,
-                    'intent': intent,
-                    'ts': _dt.utcnow(),
-                })
-            except Exception:
-                pass
+                db = _get_db()
+            except Exception as e:
+                logger.error(f"Chatbot MongoDB connect failed: {e}")
+                db = None
 
-        # Return reply + context-aware follow-up suggestions
-        follow_ups = FOLLOW_UPS.get(reply_intent, FOLLOW_UPS['general'])
+            session_id = _get_session_id(request)
 
-        return Response({
-            'reply':      reply,
-            'intent':     reply_intent,
-            'follow_ups': follow_ups,
-            'session_id': session_id,
-        })
+            if db is not None:
+                try:
+                    _save_message(db, session_id, 'user', message)
+                except Exception as e:
+                    logger.error(f"Chatbot save user msg failed: {e}")
+
+            intent = _chatbot_classify(message)
+
+            try:
+                reply, reply_intent = _chatbot_reply(intent, message, db)
+            except Exception as e:
+                logger.error(f"Chatbot reply generation failed: {e}")
+                reply, reply_intent = (
+                    "I'm having trouble processing that right now. Please try a simpler question like 'Show top candidates' or 'What is HAAR?'",
+                    'general'
+                )
+
+            if db is not None:
+                try:
+                    _save_message(db, session_id, 'bot', reply, intent=reply_intent)
+                    db.chatbot_logs.insert_one({
+                        'session_id': session_id,
+                        'message': message,
+                        'intent': intent,
+                        'ts': _dt.utcnow(),
+                    })
+                except Exception as e:
+                    logger.error(f"Chatbot save bot msg failed: {e}")
+
+            follow_ups = FOLLOW_UPS.get(reply_intent, FOLLOW_UPS['general'])
+
+            return Response({
+                'reply':      reply,
+                'intent':     reply_intent,
+                'follow_ups': follow_ups,
+                'session_id': session_id,
+            })
+
+        except Exception as e:
+            logger.error(f"ChatbotView.post fatal error: {e}")
+            return Response({
+                'reply': "Something went wrong. Please try again.",
+                'intent': 'general',
+                'follow_ups': FOLLOW_UPS['general'],
+            }, status=status.HTTP_200_OK)
 
 
 class MeView(APIView):

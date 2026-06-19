@@ -176,7 +176,7 @@ export default function RecruiterDashboard() {
       </AnimatePresence>
 
       {/* ── Chatbot ── */}
-      <Chatbot />
+      <Chatbot role="recruiter" />
     </div>
   );
 }
