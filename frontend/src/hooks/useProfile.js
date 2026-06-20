@@ -38,19 +38,18 @@ async function apiFetch(path, options = {}) {
 }
 
 export function useProfile() {
-  const [user,   setUser]   = useState(() => {
-    try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; }
-  });
+  const [user,   setUser]   = useState(null);  // never trust stale localStorage on mount
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
 
   useEffect(() => {
     apiFetch('/api/auth/me/').then(({ ok, data }) => {
       if (!ok || !data?.email) {
-        console.warn('[useProfile] /me/ failed or no email — using localStorage');
+        console.warn('[useProfile] /me/ failed — not authenticated, clearing stale user');
+        setUser(null);
+        localStorage.removeItem('user');
         return;
       }
-      // Derive name from email if backend returned blank full_name
       if (!data.full_name?.trim()) {
         data.full_name = extractNameFromEmail(data.email);
       }
@@ -58,6 +57,8 @@ export function useProfile() {
       localStorage.setItem('user', JSON.stringify(data));
     }).catch(e => {
       console.warn('[useProfile] /me/ fetch error:', e.message);
+      setUser(null);
+      localStorage.removeItem('user');
     });
   }, []);
 

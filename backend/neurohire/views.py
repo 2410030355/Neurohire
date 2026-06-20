@@ -1724,47 +1724,29 @@ CHATBOT_INTENTS = {
                    'suggest','tips','gap','missing','learn','grow'],
 }
 
-FOLLOW_UPS = {
-    'candidates': [
-        'Show top 5 candidates',
-        'How many high fit candidates?',
-        'Show candidates with Python',
-        'Filter by 3+ years experience',
-    ],
-    'analytics': [
-        'What is HAAR?',
-        'Explain CDR',
-        'Show fairness analysis',
-        'What is learning velocity?',
-    ],
-    'platform': [
-        'How does skill validation work?',
-        'How is role match calculated?',
-        'What is consistency scoring?',
-        'How does MongoDB store candidates?',
-    ],
-    'jobs': [
-        'How do I apply for a job?',
-        'What is Remotive API?',
-        'How many jobs are available?',
-    ],
-    'waitlist': [
-        'How do I schedule an interview?',
-        'How do I add to waitlist?',
-        'View scheduled interviews',
-    ],
-    'seeker': [
-        'How can I improve my resume?',
-        'What skills am I missing?',
-        'How is my readiness score calculated?',
-    ],
-    'general': [
-        'Show top candidates',
-        'What is HAAR?',
-        'How does skill validation work?',
-        'How many candidates do we have?',
-    ],
+FOLLOW_UPS_RECRUITER = {
+    'candidates': ['Show top 5 candidates', 'How many high fit candidates?', 'Show candidates with Python', 'Filter by 3+ years experience'],
+    'analytics':  ['What is HAAR?', 'Explain CDR', 'Show fairness analysis', 'What is learning velocity?'],
+    'platform':   ['How does skill validation work?', 'How is role match calculated?', 'What is consistency scoring?', 'How does MongoDB store candidates?'],
+    'jobs':       ['What is Remotive API?', 'How many jobs are available?'],
+    'waitlist':   ['How do I schedule an interview?', 'How do I add to waitlist?', 'View scheduled interviews'],
+    'seeker':     ['Show top candidates', 'What is HAAR?'],
+    'general':    ['Show top candidates', 'What is HAAR?', 'How does skill validation work?', 'How many candidates do we have?'],
 }
+
+FOLLOW_UPS_SEEKER = {
+    'candidates': ['How can I improve my resume?', 'What skills am I missing?', 'How is role match calculated?'],
+    'analytics':  ['How is my readiness score calculated?', 'What is learning velocity?'],
+    'platform':   ['How does skill validation work?', 'How does the mock interview work?', 'How do I improve my role match?'],
+    'jobs':       ['How do I apply for a job?', 'What is Remotive API?', 'How many jobs are available?'],
+    'waitlist':   ['How do I schedule an interview?'],
+    'seeker':     ['What skills am I missing?', 'How can I improve my resume?', 'Tips for mock interview', 'How is my readiness score calculated?'],
+    'general':    ['How can I improve my resume?', 'How does skill validation work?', 'What skills am I missing?', 'How do I prepare for a mock interview?'],
+}
+
+def _get_follow_ups(role, intent):
+    table = FOLLOW_UPS_SEEKER if role == 'jobseeker' else FOLLOW_UPS_RECRUITER
+    return table.get(intent, table['general'])
 
 def _get_session_id(request):
     """Get or create a session ID for this user."""
@@ -1878,10 +1860,10 @@ def _build_candidate_pipeline(q):
     return pipeline, skill, exp
 
 
-def _chatbot_reply(intent, message, db):
+def _chatbot_reply(intent, message, db, role='recruiter'):
     q = message.lower()
 
-    if intent == 'candidates':
+    if intent == 'candidates' and role != 'jobseeker':
         if db is None:
             return 'Candidate data is temporarily unavailable (database connection issue). Please try again shortly.', 'candidates'
         try:
@@ -2048,11 +2030,37 @@ def _chatbot_reply(intent, message, db):
                 'Ask about any specific feature.'), 'platform'
 
     if intent == 'seeker':
+        if any(w in q for w in ['missing', 'gap', 'lack']):
+            return ('**Finding Your Skill Gaps**' + NL +
+                    'Upload your resume in the Resume Analyzer tab with your target role.' + NL + NL +
+                    'You will see:' + NL +
+                    '- Skills you already have (verified by evidence)' + NL +
+                    '- Skills missing for your target role' + NL +
+                    '- Specific suggestions to close those gaps'), 'seeker'
+        if any(w in q for w in ['readiness', 'how is my score']):
+            return ('**Readiness Score**' + NL +
+                    'Combines two things equally:' + NL + NL +
+                    '- 50% Role Match - how well your resume matches the target role (TF-IDF similarity)' + NL +
+                    '- 50% Resume Strength - skills, education, and experience depth' + NL + NL +
+                    'Improve either side to raise your overall readiness.'), 'seeker'
+        if any(w in q for w in ['mock', 'interview']):
+            return ('**Mock Interview Tips**' + NL +
+                    'Go to the Mock Interview tab and pick your target role.' + NL + NL +
+                    'The AI scores you on:' + NL +
+                    '- Confidence and clarity of your answers' + NL +
+                    '- Filler word usage (um, uh, like)' + NL +
+                    '- Speaking pace' + NL + NL +
+                    'Practice a few rounds before a real interview.'), 'seeker'
+        if any(w in q for w in ['job', 'apply', 'opening']):
+            return ('**Finding Jobs**' + NL +
+                    'Check the Job Board tab for live listings from Remotive API.' + NL +
+                    'Filter by role and click any card to apply directly.'), 'seeker'
         return ('**Resume Improvement Tips**' + NL + NL +
                 '- Add action verbs near skill mentions (built, deployed, implemented)' + NL +
                 '- Include measurable outcomes in project descriptions' + NL +
                 '- Paste a job description for precise role match scoring' + NL +
-                '- Readiness score = 50% role match + 50% resume strength'), 'seeker'
+                '- Readiness score = 50% role match + 50% resume strength' + NL + NL +
+                'Upload your resume in the Resume Analyzer tab to get started.'), 'seeker'
 
     if intent == 'jobs':
         return ('**Job Board**' + NL +
@@ -2074,13 +2082,21 @@ def _chatbot_reply(intent, message, db):
                 '- View and manage in the Waitlist tab' + NL +
                 '- Prioritise by fit score or manually'), 'waitlist'
 
+    if role == 'jobseeker':
+        return ('Hi! I am the NeuroHire assistant.' + NL + NL +
+                'I can help with:' + NL +
+                '- **Resume tips** - improve your score and fix gaps' + NL +
+                '- **Mock interview** - prepare and practice' + NL +
+                '- **Job board** - find openings' + NL +
+                '- **Platform** - how any feature works' + NL + NL +
+                'Try: "How can I improve my resume?" or "What skills am I missing?"'), 'general'
+
     return ('Hi! I am the NeuroHire assistant powered by MongoDB.' + NL + NL +
             'I can help with:' + NL +
             '- **Candidates** - search, filter, scores' + NL +
             '- **Analytics** - HAAR, CDR, SVC, LVS' + NL +
             '- **Platform** - how any feature works' + NL +
-            '- **Jobs** - job board' + NL +
-            '- **Resume tips** - for job seekers' + NL + NL +
+            '- **Jobs** - job board' + NL + NL +
             'Try: "Show top candidates" or "What is HAAR?"'), 'general'
 
 
@@ -2101,9 +2117,12 @@ class ChatbotView(APIView):
             return Response({'history': [], 'error': str(e)})
 
     def post(self, request):
-        """Process a chat message, save to MongoDB, return reply + follow-ups."""
+        """Process a chat message, save to MongoDB, return reply + role-aware follow-ups."""
         try:
             message = (request.data.get('message') or '').strip()[:500]
+            role    = (request.data.get('role') or 'recruiter').strip().lower()
+            if role not in ('recruiter', 'jobseeker'):
+                role = 'recruiter'
             if not message:
                 return Response({'error': 'Message required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2123,12 +2142,17 @@ class ChatbotView(APIView):
 
             intent = _chatbot_classify(message)
 
+            # Seekers asking candidate-style questions get redirected to seeker context
+            if role == 'jobseeker' and intent == 'candidates':
+                intent = 'seeker'
+
             try:
-                reply, reply_intent = _chatbot_reply(intent, message, db)
+                reply, reply_intent = _chatbot_reply(intent, message, db, role)
             except Exception as e:
                 logger.error(f"Chatbot reply generation failed: {e}")
+                fallback_q = "Show top candidates" if role == 'recruiter' else "How can I improve my resume?"
                 reply, reply_intent = (
-                    "I'm having trouble processing that right now. Please try a simpler question like 'Show top candidates' or 'What is HAAR?'",
+                    f"I'm having trouble processing that right now. Try something like '{fallback_q}' or 'What is HAAR?'",
                     'general'
                 )
 
@@ -2139,12 +2163,13 @@ class ChatbotView(APIView):
                         'session_id': session_id,
                         'message': message,
                         'intent': intent,
+                        'role': role,
                         'ts': _dt.utcnow(),
                     })
                 except Exception as e:
                     logger.error(f"Chatbot save bot msg failed: {e}")
 
-            follow_ups = FOLLOW_UPS.get(reply_intent, FOLLOW_UPS['general'])
+            follow_ups = _get_follow_ups(role, reply_intent)
 
             return Response({
                 'reply':      reply,

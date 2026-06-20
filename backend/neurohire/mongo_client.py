@@ -34,7 +34,7 @@ def _get_db():
         mongo_uri = getattr(settings, 'MONGODB_URI', 'mongodb://localhost:27017/')
         db_name   = getattr(settings, 'MONGODB_DB',  'neurohire')
 
-        _client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
+        _client = MongoClient(mongo_uri, serverSelectionTimeoutMS=8000, connectTimeoutMS=8000)
         # Ping to confirm connection
         _client.admin.command('ping')
         _db = _client[db_name]

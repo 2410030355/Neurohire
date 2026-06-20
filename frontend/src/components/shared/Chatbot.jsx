@@ -56,19 +56,17 @@ function TypingMessage({ text, onDone }) {
   );
 }
 
-const DEFAULT_FOLLOW_UPS = [
-  'Show top candidates',
-  'What is HAAR?',
-  'How does skill validation work?',
-  'How many candidates do we have?',
-];
+const FOLLOW_UPS_BY_ROLE = {
+  recruiter: ['Show top candidates', 'What is HAAR?', 'How does skill validation work?', 'How many candidates do we have?'],
+  jobseeker: ['How can I improve my resume?', 'What skills am I missing?', 'Tips for mock interview', 'How is my readiness score calculated?'],
+};
 
 export default function Chatbot({ role = 'recruiter' }) {
   const [open,       setOpen]       = useState(false);
   const [messages,   setMessages]   = useState([]);
   const [input,      setInput]      = useState('');
   const [loading,    setLoading]    = useState(false);
-  const [followUps,  setFollowUps]  = useState(DEFAULT_FOLLOW_UPS);
+  const [followUps,  setFollowUps]  = useState(FOLLOW_UPS_BY_ROLE[role] || FOLLOW_UPS_BY_ROLE.recruiter);
   const [typingIdx,  setTypingIdx]  = useState(null);
   const [histLoaded, setHistLoaded] = useState(false);
   const bottomRef = useRef(null);
@@ -127,7 +125,7 @@ export default function Chatbot({ role = 'recruiter' }) {
       const res = await fetch(`${API_BASE_URL}/api/chatbot/`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ message: msg }),
+        body:    JSON.stringify({ message: msg, role }),
       });
       console.log('[Chatbot] status:', res.status);
       const raw = await res.text();
@@ -139,14 +137,14 @@ export default function Chatbot({ role = 'recruiter' }) {
         setTypingIdx(next.length - 1);
         return next;
       });
-      setFollowUps(data.follow_ups || DEFAULT_FOLLOW_UPS);
+      setFollowUps(data.follow_ups || FOLLOW_UPS_BY_ROLE[role] || FOLLOW_UPS_BY_ROLE.recruiter);
     } catch (e) {
       console.error('[Chatbot] error:', e);
       setMessages(prev => [
         ...prev,
         { role: 'bot', text: `Error: ${e.message}\n\nCheck F12 console for details.`, typed: true }
       ]);
-      setFollowUps(DEFAULT_FOLLOW_UPS);
+      setFollowUps(FOLLOW_UPS_BY_ROLE[role] || FOLLOW_UPS_BY_ROLE.recruiter);
     } finally {
       setLoading(false);
     }
@@ -158,7 +156,7 @@ export default function Chatbot({ role = 'recruiter' }) {
       text: 'Chat cleared. How can I help you?',
       typed: true,
     }]);
-    setFollowUps(DEFAULT_FOLLOW_UPS);
+    setFollowUps(FOLLOW_UPS_BY_ROLE[role] || FOLLOW_UPS_BY_ROLE.recruiter);
     setHistLoaded(false);
   };
 
