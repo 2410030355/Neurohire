@@ -9,7 +9,7 @@ import { useProfile } from '@/hooks/useProfile';
 import { useTheme } from '@/hooks/useTheme';
 
 export default function SeekerProfileDropdown() {
-  const { user, displayName, initials, saving, error, roleMismatch, saveProfile } = useProfile('jobseeker');
+  const { user, displayName, initials, saving, error, loading, roleMismatch, notLoggedIn, saveProfile } = useProfile('jobseeker');
   const [light, toggleTheme] = useTheme();
   const [open,    setOpen]   = useState(false);
   const [editing, setEditing] = useState(false);
@@ -45,12 +45,46 @@ export default function SeekerProfileDropdown() {
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  // ── Loading state ──
-  if (!user && !roleMismatch) {
+  // ── Loading state — theme toggle stays interactive, only avatar pulses ──
+  if (loading) {
     return (
       <div className="flex items-center gap-2">
+        <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}
+          onClick={toggleTheme}
+          className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'var(--nh-primary-light)', border: '1px solid var(--nh-border)' }}>
+          {light
+            ? <Moon className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />
+            : <Sun  className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />}
+        </motion.button>
         <div className="w-9 h-9 rounded-xl animate-pulse" style={{ background: 'var(--nh-border)' }} />
-        <div className="w-24 h-9 rounded-xl animate-pulse hidden md:block" style={{ background: 'var(--nh-border)' }} />
+        <div className="w-20 h-4 rounded animate-pulse hidden md:block" style={{ background: 'var(--nh-border)' }} />
+      </div>
+    );
+  }
+
+  // ── Theme toggle is ALWAYS rendered, independent of auth state ──
+  const ThemeButton = (
+    <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}
+      onClick={toggleTheme}
+      className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+      style={{ background: 'var(--nh-primary-light)', border: '1px solid var(--nh-border)' }}>
+      {light
+        ? <Moon className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />
+        : <Sun  className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />}
+    </motion.button>
+  );
+
+  // ── Not logged in — show theme toggle + sign-in prompt, never blank ──
+  if (notLoggedIn) {
+    return (
+      <div className="flex items-center gap-2">
+        {ThemeButton}
+        <a href="/RoleSelect"
+          className="text-sm font-medium px-3 py-2 rounded-xl"
+          style={{ color: 'var(--nh-primary)', border: '1px solid var(--nh-border)' }}>
+          Sign in
+        </a>
       </div>
     );
   }
@@ -58,14 +92,7 @@ export default function SeekerProfileDropdown() {
   return (
     <div className="flex items-center gap-2" ref={ref}>
 
-      <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}
-        onClick={toggleTheme}
-        className="w-9 h-9 rounded-xl flex items-center justify-center"
-        style={{ background: 'var(--nh-primary-light)', border: '1px solid var(--nh-border)' }}>
-        {light
-          ? <Moon className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />
-          : <Sun  className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />}
-      </motion.button>
+      {ThemeButton}
 
       <div className="relative">
         <button onClick={() => { setOpen(!open); setEditing(false); }}

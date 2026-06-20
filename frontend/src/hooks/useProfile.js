@@ -43,29 +43,40 @@ async function apiFetch(path, options = {}) {
  *   (dropdown shows a "wrong dashboard" state instead of someone else's name)
  */
 export function useProfile(expectedRole) {
-  const [user,        setUser]        = useState(null);
+  const [user,         setUser]         = useState(null);
+  const [loading,      setLoading]      = useState(true);   // explicit — fixes infinite skeleton
   const [roleMismatch, setRoleMismatch] = useState(false);
-  const [saving,       setSaving]       = useState(false);
-  const [error,        setError]        = useState('');
+  const [notLoggedIn,  setNotLoggedIn]  = useState(false);
+  const [saving,        setSaving]      = useState(false);
+  const [error,         setError]       = useState('');
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+
+    const finish = () => { if (!cancelled) setLoading(false); };
 
     apiFetch('/api/auth/me/').then(({ ok, data }) => {
       if (cancelled) return;
 
       if (!ok || !data?.email) {
+        console.warn('[useProfile] /me/ returned', ok ? 'no email' : 'not ok — user not logged in');
         setUser(null);
         setRoleMismatch(false);
+        setNotLoggedIn(true);
         localStorage.removeItem('user');
+        finish();
         return;
       }
+
+      setNotLoggedIn(false);
 
       // Guard: this dashboard expects a specific role
       if (expectedRole && data.role && data.role !== expectedRole) {
         console.warn(`[useProfile] role mismatch: session is "${data.role}", dashboard expects "${expectedRole}"`);
         setUser(null);
         setRoleMismatch(true);
+        finish();
         return;
       }
 
@@ -73,7 +84,7 @@ export function useProfile(expectedRole) {
         data.full_name = extractNameFromEmail(data.email);
       }
 
-      // Pull extra profile fields (phone, company, college, etc.)
+      // Pull extra profile fields (phone, company, college, etc.) — best effort
       apiFetch('/api/auth/profile/').then(({ ok: ok2, data: data2 }) => {
         if (cancelled) return;
         const merged = ok2 && data2?.email ? { ...data, ...data2 } : data;
@@ -81,15 +92,21 @@ export function useProfile(expectedRole) {
         setUser(merged);
         setRoleMismatch(false);
         localStorage.setItem('user', JSON.stringify(merged));
+        finish();
       }).catch(() => {
+        // /profile/ failed but /me/ succeeded — still show basic user info
         setUser(data);
         setRoleMismatch(false);
         localStorage.setItem('user', JSON.stringify(data));
+        finish();
       });
-    }).catch(() => {
+    }).catch((e) => {
+      console.warn('[useProfile] /me/ fetch threw:', e.message);
       if (cancelled) return;
       setUser(null);
+      setNotLoggedIn(true);
       localStorage.removeItem('user');
+      finish();
     });
 
     return () => { cancelled = true; };
@@ -131,5 +148,5 @@ export function useProfile(expectedRole) {
     .toUpperCase()
     .slice(0, 2) || '?';
 
-  return { user, displayName, initials, saving, error, roleMismatch, saveProfile };
+  return { user, displayName, initials, saving, error, loading, roleMismatch, notLoggedIn, saveProfile };
 }
