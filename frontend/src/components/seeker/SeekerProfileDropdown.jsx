@@ -2,14 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronDown, Sun, Moon, LogOut, Pencil, X,
-  Save, GraduationCap, Phone, MapPin, Linkedin, Briefcase, Github
+  Save, GraduationCap, Phone, MapPin, Linkedin, Briefcase, AlertTriangle
 } from 'lucide-react';
 import { jsonFetch } from '@/api/http';
 import { useProfile } from '@/hooks/useProfile';
 import { useTheme } from '@/hooks/useTheme';
 
 export default function SeekerProfileDropdown() {
-  const { user, displayName, initials, saving, error, saveProfile } = useProfile();
+  const { user, displayName, initials, saving, error, roleMismatch, saveProfile } = useProfile('jobseeker');
   const [light, toggleTheme] = useTheme();
   const [open,    setOpen]   = useState(false);
   const [editing, setEditing] = useState(false);
@@ -45,10 +45,19 @@ export default function SeekerProfileDropdown() {
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
+  // ── Loading state ──
+  if (!user && !roleMismatch) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="w-9 h-9 rounded-xl animate-pulse" style={{ background: 'var(--nh-border)' }} />
+        <div className="w-24 h-9 rounded-xl animate-pulse hidden md:block" style={{ background: 'var(--nh-border)' }} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2" ref={ref}>
 
-      {/* Theme toggle */}
       <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}
         onClick={toggleTheme}
         className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -58,21 +67,56 @@ export default function SeekerProfileDropdown() {
           : <Sun  className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />}
       </motion.button>
 
-      {/* Avatar */}
       <div className="relative">
         <button onClick={() => { setOpen(!open); setEditing(false); }}
           className="flex items-center gap-2 px-2 py-1.5 rounded-xl transition-all"
-          style={{ border: '1px solid var(--nh-border)', background: 'var(--nh-card)' }}>
-          <div className="w-7 h-7 rounded-full gradient-bg flex items-center justify-center flex-shrink-0">
-            <span className="text-xs font-bold text-white">{initials}</span>
+          style={{
+            border: `1px solid ${roleMismatch ? 'var(--nh-danger)' : 'var(--nh-border)'}`,
+            background: 'var(--nh-card)',
+          }}>
+          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: roleMismatch ? 'var(--nh-danger)' : undefined }}>
+            {roleMismatch
+              ? <AlertTriangle className="w-3.5 h-3.5 text-white" />
+              : <div className="w-7 h-7 rounded-full gradient-bg flex items-center justify-center">
+                  <span className="text-xs font-bold text-white">{initials}</span>
+                </div>
+            }
           </div>
           <span className="hidden md:block text-sm font-medium max-w-[120px] truncate"
-            style={{ color: 'var(--nh-text)' }}>{displayName}</span>
+            style={{ color: roleMismatch ? 'var(--nh-danger)' : 'var(--nh-text)' }}>
+            {roleMismatch ? 'Wrong account' : displayName}
+          </span>
           <ChevronDown className="w-3.5 h-3.5 hidden md:block" style={{ color: 'var(--nh-text-secondary)' }} />
         </button>
 
         <AnimatePresence>
-          {open && (
+          {open && roleMismatch && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              className="absolute right-0 top-12 w-72 rounded-2xl z-[200] overflow-hidden p-4"
+              style={{ background: 'var(--nh-card)', border: '1px solid var(--nh-danger)', boxShadow: 'var(--nh-shadow-lg)' }}>
+              <AlertTriangle className="w-6 h-6 mb-2" style={{ color: 'var(--nh-danger)' }} />
+              <p className="text-sm font-semibold mb-1" style={{ color: 'var(--nh-text)' }}>
+                This account is registered as a Recruiter
+              </p>
+              <p className="text-xs mb-3" style={{ color: 'var(--nh-text-secondary)' }}>
+                You're signed in with a job seeker account but viewing the Seeker Dashboard. Sign out and log in as a job seeker.
+              </p>
+              <button
+                onClick={async () => {
+                  try { await jsonFetch('/api/auth/logout/', { method: 'POST' }); } catch {}
+                  localStorage.removeItem('user');
+                  window.location.href = '/';
+                }}
+                className="w-full py-2 rounded-xl text-sm font-semibold text-white"
+                style={{ background: 'var(--nh-danger)' }}>
+                Sign out
+              </button>
+            </motion.div>
+          )}
+
+          {open && !roleMismatch && (
             <motion.div
               initial={{ opacity: 0, y: -8, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -81,7 +125,6 @@ export default function SeekerProfileDropdown() {
               className="absolute right-0 top-12 w-80 rounded-2xl z-[200] overflow-hidden"
               style={{ background: 'var(--nh-card)', border: '1px solid var(--nh-border)', boxShadow: 'var(--nh-shadow-lg)' }}>
 
-              {/* ── Header ── */}
               <div className="p-4 border-b" style={{
                 borderColor: 'var(--nh-border)',
                 background: 'linear-gradient(135deg, var(--nh-primary-light), var(--nh-secondary-light))',
@@ -113,26 +156,25 @@ export default function SeekerProfileDropdown() {
                     className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
                     style={{ background: 'var(--nh-primary-light)' }}>
                     {editing
-                      ? <X      className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />
+                      ? <X className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />
                       : <Pencil className="w-4 h-4" style={{ color: 'var(--nh-primary)' }} />}
                   </button>
                 </div>
               </div>
 
-              {/* ── View mode ── */}
               {!editing && (
                 <div className="p-3 space-y-1.5">
-                  {user?.job_title && <InfoRow icon={Briefcase}    value={user.job_title} />}
+                  {user?.job_title && <InfoRow icon={Briefcase}     value={user.job_title} />}
                   {user?.college   && <InfoRow icon={GraduationCap} value={user.college} />}
-                  {user?.phone     && <InfoRow icon={Phone}         value={user.phone} />}
-                  {user?.location  && <InfoRow icon={MapPin}        value={user.location} />}
+                  {user?.phone     && <InfoRow icon={Phone}     value={user.phone} />}
+                  {user?.location  && <InfoRow icon={MapPin}    value={user.location} />}
                   {user?.linkedin  && (
                     <InfoRow icon={Linkedin} value={user.linkedin}
                       link={user.linkedin.startsWith('http') ? user.linkedin : `https://${user.linkedin}`} />
                   )}
                   {!user?.job_title && !user?.college && !user?.phone && (
                     <p className="text-xs text-center py-2" style={{ color: 'var(--nh-text-secondary)' }}>
-                      Click ✏️ to add your details
+                      Click the pencil icon to add your details
                     </p>
                   )}
                   <Divider />
@@ -140,16 +182,15 @@ export default function SeekerProfileDropdown() {
                 </div>
               )}
 
-              {/* ── Edit mode ── */}
               {editing && (
                 <div className="p-3 space-y-2 max-h-80 overflow-y-auto nh-scrollbar">
-                  <EditField label="Full Name"    value={form.full_name} onChange={set('full_name')} placeholder="Your full name" />
-                  <EditField label="Target Role"  value={form.job_title} onChange={set('job_title')} placeholder="e.g. Frontend Developer" />
-                  <EditField label="College"      value={form.college}   onChange={set('college')}   placeholder="e.g. JNTU Hyderabad" />
-                  <EditField label="Phone"        value={form.phone}     onChange={set('phone')}     placeholder="+91 98765 43210" />
-                  <EditField label="Location"     value={form.location}  onChange={set('location')}  placeholder="e.g. Hyderabad, India" />
-                  <EditField label="LinkedIn"     value={form.linkedin}  onChange={set('linkedin')}  placeholder="linkedin.com/in/yourname" />
-                  <EditField label="Bio"          value={form.bio}       onChange={set('bio')}       placeholder="Tell us about yourself..." />
+                  <EditField label="Full Name"   value={form.full_name} onChange={set('full_name')} placeholder="Your full name" />
+                  <EditField label="Target Role" value={form.job_title} onChange={set('job_title')} placeholder="e.g. Frontend Developer" />
+                  <EditField label="College"     value={form.college}   onChange={set('college')}   placeholder="e.g. JNTU Hyderabad" />
+                  <EditField label="Phone"       value={form.phone}     onChange={set('phone')}     placeholder="+91 98765 43210" />
+                  <EditField label="Location"    value={form.location}  onChange={set('location')}  placeholder="e.g. Hyderabad, India" />
+                  <EditField label="LinkedIn"    value={form.linkedin}  onChange={set('linkedin')}  placeholder="linkedin.com/in/yourname" />
+                  <EditField label="Bio"         value={form.bio}       onChange={set('bio')}       placeholder="Tell us about yourself..." />
                   {error && <p className="text-xs" style={{ color: 'var(--nh-danger)' }}>{error}</p>}
                   <button onClick={handleSave} disabled={saving}
                     className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold text-white mt-1"
