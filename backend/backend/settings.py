@@ -139,6 +139,14 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # ── CORS ──────────────────────────────────────────────────────────────────
 CORS_ALLOW_CREDENTIALS = True
+
+# Cross-origin session cookies (Vercel frontend -> Render backend)
+SESSION_COOKIE_SAMESITE = 'None'
+SESSION_COOKIE_SECURE   = True
+CSRF_COOKIE_SAMESITE    = 'None'
+CSRF_COOKIE_SECURE      = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_AGE      = 60 * 60 * 24 * 14  # 14 days
 CORS_ALLOWED_ORIGINS   = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
     'http://localhost:5173,http://localhost:3000'
