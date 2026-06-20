@@ -1171,6 +1171,7 @@ class TalentSearchView(APIView):
         CANDIDATE_POOL = [
             {
                 'name': 'Aarav Mehta',
+                'roles': ['backend developer', 'python developer', 'django developer', 'software engineer'],
                 'location': 'Bangalore, Karnataka',
                 'education': "B.Tech Computer Science — VIT Vellore (2021)",
                 'companies': ['Infosys', 'Razorpay'],
@@ -1185,6 +1186,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Priya Nair',
+                'roles': ['frontend developer', 'react developer', 'ui developer', 'software engineer'],
                 'location': 'Hyderabad, Telangana',
                 'education': "M.Tech Software Engineering — BITS Pilani (2022)",
                 'companies': ['TCS', 'Flipkart'],
@@ -1199,6 +1201,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Rohit Sharma',
+                'roles': ['java developer', 'backend developer', 'software engineer', 'microservices engineer'],
                 'location': 'Pune, Maharashtra',
                 'education': "B.E. Information Technology — Pune University (2020)",
                 'companies': ['Wipro', 'Persistent Systems'],
@@ -1213,6 +1216,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Sneha Patel',
+                'roles': ['data scientist', 'machine learning engineer', 'ml engineer', 'data analyst'],
                 'location': 'Mumbai, Maharashtra',
                 'education': "B.Sc Computer Science — Mumbai University (2023)",
                 'companies': ['Internship at Zomato'],
@@ -1227,6 +1231,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Karan Joshi',
+                'roles': ['full stack developer', 'fullstack developer', 'react developer', 'python developer', 'software engineer'],
                 'location': 'Chennai, Tamil Nadu',
                 'education': "B.Tech IT — Anna University (2019)",
                 'companies': ['HCL Technologies', 'Zoho', 'Freshworks'],
@@ -1241,6 +1246,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Divya Menon',
+                'roles': ['backend developer', 'python developer', 'flask developer', 'software engineer'],
                 'location': 'Kochi, Kerala',
                 'education': "MCA — Cochin University of Science and Technology (2021)",
                 'companies': ['UST Global', 'IBS Software'],
@@ -1255,6 +1261,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Aditya Kumar',
+                'roles': ['frontend developer', 'react developer', 'ui developer', 'web developer'],
                 'location': 'Noida, Uttar Pradesh',
                 'education': "B.Tech CSE — Amity University (2022)",
                 'companies': ['Accenture', 'Capgemini'],
@@ -1269,6 +1276,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Ananya Singh',
+                'roles': ['devops engineer', 'cloud engineer', 'site reliability engineer', 'sre', 'kubernetes engineer'],
                 'location': 'Delhi, NCR',
                 'education': "B.Tech CSE — DTU (2020)",
                 'companies': ['Paytm', 'PhonePe', 'Meesho'],
@@ -1283,6 +1291,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Vikram Rao',
+                'roles': ['java developer', 'full stack developer', 'fullstack developer', 'software engineer'],
                 'location': 'Bangalore, Karnataka',
                 'education': "B.E. ECE — RV College of Engineering (2018)",
                 'companies': ['Mindtree', 'Mphasis', 'Publicis Sapient'],
@@ -1297,6 +1306,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Neha Gupta',
+                'roles': ['data analyst', 'data scientist', 'business analyst'],
                 'location': 'Hyderabad, Telangana',
                 'education': "B.Tech CSE — JNTU (2023)",
                 'companies': ['Internship at Byju\'s', 'Internship at Swiggy'],
@@ -1311,6 +1321,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Rahul Verma',
+                'roles': ['software engineer', 'backend developer', 'system design engineer', 'sde'],
                 'location': 'Indore, Madhya Pradesh',
                 'education': "B.Tech CSE — IIT Indore (2021)",
                 'companies': ['Microsoft', 'Adobe'],
@@ -1325,6 +1336,7 @@ class TalentSearchView(APIView):
             },
             {
                 'name': 'Pooja Iyer',
+                'roles': ['full stack developer', 'fullstack developer', 'python developer', 'software engineer'],
                 'location': 'Coimbatore, Tamil Nadu',
                 'education': "B.E. CSE — PSG College of Technology (2022)",
                 'companies': ['Cognizant', 'Tata Elxsi'],
@@ -1338,6 +1350,42 @@ class TalentSearchView(APIView):
                 'profile_url': 'https://indeed.com/r/pooja-iyer-python',
             },
         ]
+
+        # ── Role relevance filter — only show candidates matching the searched role ──
+        # Fixes "all 12 shown regardless of search" — now filters by actual role tags
+        # plus a fallback skill-overlap check so close-enough roles still surface.
+        role_q = role.lower().strip()
+        role_words = set(_re.findall(r'[a-z]+', role_q))
+
+        def _role_matches(candidate):
+            tags = candidate.get('roles', [])
+            # 1) Direct substring match against any tag
+            for tag in tags:
+                if role_q in tag or tag in role_q:
+                    return True
+            # 2) Word overlap match (e.g. "Senior React Engineer" vs tag "react developer")
+            tag_words = set()
+            for tag in tags:
+                tag_words.update(tag.split())
+            if role_words & tag_words:
+                return True
+            # 3) Skill overlap fallback — if role mentions a tech the candidate has
+            all_skills_lower = {s.lower() for s in candidate['base_skills'] + candidate['extra_skills']}
+            if role_words & all_skills_lower:
+                return True
+            return False
+
+        CANDIDATE_POOL = [c for c in CANDIDATE_POOL if _role_matches(c)]
+
+        # If nothing matches the searched role, don't fabricate irrelevant results
+        if not CANDIDATE_POOL:
+            return Response({
+                'candidates': [],
+                'total_count': 0,
+                'source': 'portal',
+                'query': role,
+                'message': f'No simulated candidates found for "{role}". Try a broader role title (e.g. "Backend Developer" instead of "Senior Backend Engineer III").',
+            })
 
         # ── Experience range filter ─────────────────────────────────────
         exp_ranges = {
