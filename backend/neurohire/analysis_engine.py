@@ -260,17 +260,36 @@ def extract_education(text: str) -> Optional[str]:
 
 def compute_learning_velocity(text: str) -> str:
     """
-    Measure learning velocity based on action verbs and project descriptions.
-    Returns: High, Medium, or Low
+    Learning velocity label — High / Medium / Low.
+    Based on growth-indicator keyword frequency in resume text.
     """
     count = sum(1 for word in LEARNING_WORDS if word in text.lower())
-
-    # Scaled thresholds based on expanded learning vocabulary
     if count >= 8:
         return "High"
     elif count >= 4:
         return "Medium"
     return "Low"
+
+
+def compute_learning_velocity_score(skills: List[str], experience_years: float) -> float:
+    """
+    Learning Velocity numeric score (paper §IV.E3).
+    Formula: LV = new_skills_count / max(1, years)
+    Normalised 0-100 using typical range cap of 10 skills/year as max.
+
+    In the absence of timestamped skill acquisition data (not available
+    from static resumes), we approximate "new skills" as total detected
+    skills and normalise against experience years — consistent with
+    the paper's min-max normalisation approach.
+    """
+    if experience_years <= 0:
+        experience_years = 1.0
+    raw_lv = len(skills) / experience_years
+    # Normalise: cap at 10 skills/year as practical maximum
+    LV_MAX = 10.0
+    LV_MIN = 0.0
+    normalised = (raw_lv - LV_MIN) / (LV_MAX - LV_MIN)
+    return round(min(100.0, max(0.0, normalised * 100)), 2)
 
 
 def compute_role_match(resume_text: str, target_role: str, skills: List[str],
@@ -432,11 +451,36 @@ def compute_resume_strength_score(skills: List[str], education: Optional[str],
     return round(min(100, total), 2)
 
 
-def compute_final_fit(role_score: float) -> str:
-    """Categorize candidate fit based on role match score."""
-    if role_score >= 70:
+def compute_analytical_score(consistency_score: float,
+                             skill_validation_score: float,
+                             lv_score: float) -> float:
+    """
+    Analytical Score (paper §IV.F):
+    AS = (CS + VS + LV) / 3
+    Each component equally weighted to provide unbiased analysis.
+    All inputs are on 0-100 scale.
+    """
+    return round((consistency_score + skill_validation_score + lv_score) / 3, 2)
+
+
+def compute_final_score(semantic_score: float, analytical_score: float,
+                        alpha: float = 0.5, beta: float = 0.5) -> float:
+    """
+    Final Score (paper §IV.G):
+    FS = alpha * SS + beta * AS   (alpha=0.5, beta=0.5 by default)
+    Balances semantic relevance with structured analytical evaluation.
+    """
+    return round(alpha * semantic_score + beta * analytical_score, 2)
+
+
+def compute_final_fit(final_score: float) -> str:
+    """
+    Classify final fit from the combined Final Score.
+    Thresholds aligned to paper: High >= 70, Medium >= 40, Low < 40.
+    """
+    if final_score >= 70:
         return "High"
-    elif role_score >= 45:
+    elif final_score >= 40:
         return "Medium"
     return "Low"
 
@@ -497,21 +541,33 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
         experience_years = extract_experience(text_lower)
         education = extract_education(text_lower)
 
-        # Compute role matching scores
+        # ── Semantic Similarity Score (SS) — paper §IV.C/D ──────────────────
         role_score = compute_role_match(text_lower, target_role, skills, job_description)
-        final_fit = compute_final_fit(role_score)
 
-        # Compute additional scores
+        # ── Analytical Score components — paper §IV.E ─────────────────────
         consistency_score = compute_consistency_score(skills, experience_years)
-        skill_validation_score = compute_skill_validation_score(skills, learning_velocity)
         resume_strength_score = compute_resume_strength_score(skills, education, experience_years)
 
-        # Evidence-backed skill validation (paper §IV.B)
+        # Evidence-backed skill validation (paper §IV.B / §IV.E2)
         validated_skills = validate_skills_from_text(skills, text_lower)
         valid_count = sum(1 for v in validated_skills if v['status'] == 'Valid')
-        # Override skill_validation_score with evidence-based score
-        if validated_skills:
-            skill_validation_score = round((valid_count / len(validated_skills)) * 100, 2)
+        skill_validation_score = (
+            round((valid_count / len(validated_skills)) * 100, 2)
+            if validated_skills else
+            compute_skill_validation_score(skills, learning_velocity)
+        )
+
+        # Learning Velocity numeric score (paper §IV.E3)
+        lv_score = compute_learning_velocity_score(skills, experience_years)
+
+        # Analytical Score AS = (CS + VS + LV) / 3 (paper §IV.F)
+        analytical_score = compute_analytical_score(
+            consistency_score, skill_validation_score, lv_score
+        )
+
+        # Final Score FS = 0.5 * SS + 0.5 * AS (paper §IV.G)
+        final_score = compute_final_score(role_score, analytical_score)
+        final_fit = compute_final_fit(final_score)
 
         # Generate career insights
         career_trajectory = generate_career_trajectory(skills, learning_velocity, experience_years)
@@ -519,10 +575,14 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
         # Identify missing skills (from top skills not in resume)
         missing_skills = [s for s in SKILL_KEYWORDS[:50] if s not in skills][:8]
 
-        # Generate explainability text
+        # Generate explainability text (paper §III.D — transparency)
         jd_note = " Matched against full job description." if job_description and job_description.strip() else ""
         explainability = (
-            f"Matched {len(skills)} key skills with {role_score}% role relevance.{jd_note} "
+            f"Semantic match: {role_score:.0f}%.{jd_note} "
+            f"Analytical score: {analytical_score:.0f}/100 "
+            f"(Consistency: {consistency_score:.0f}, Skill validation: {skill_validation_score:.0f}, "
+            f"Learning velocity: {lv_score:.0f}). "
+            f"Final score: {final_score:.0f}/100. "
             f"Profile shows {learning_velocity.lower()} learning velocity with "
             f"{experience_years:.1f} years of experience."
         )
@@ -550,13 +610,20 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
             "experience_years": experience_years,
             "education": education,
 
-            # Role Matching
+            # Semantic similarity (paper §IV.C)
             "role_match_score": role_score,
-            "final_fit": final_fit,
 
-            # Quality Scores
+            # Analytical score components (paper §IV.E-F)
             "consistency_score": consistency_score,
             "skill_validation_score": skill_validation_score,
+            "lv_score": lv_score,
+            "analytical_score": analytical_score,
+
+            # Final combined score (paper §IV.G: FS = 0.5*SS + 0.5*AS)
+            "final_score": final_score,
+            "final_fit": final_fit,
+
+            # Supplementary
             "resume_strength_score": resume_strength_score,
 
             # Insights
