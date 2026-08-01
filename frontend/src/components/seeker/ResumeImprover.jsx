@@ -53,8 +53,12 @@ export default function ResumeImprover() {
 
       const text = await res.text();
       let data;
-      try { data = JSON.parse(text); }
-      catch { throw new Error(text || 'Server returned invalid response'); }
+      try { 
+        data = JSON.parse(text); 
+      }
+      catch (parseErr) { 
+        throw new Error(text ? 'Server returned invalid response' : 'Empty response from server');
+      }
 
       if (!res.ok) throw new Error(data?.error || `Server error ${res.status}`);
 

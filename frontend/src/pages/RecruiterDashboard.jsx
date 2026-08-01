@@ -26,9 +26,10 @@ export default function RecruiterDashboard() {
   const { data: rawCandidates, isLoading: candidatesLoading } = useQuery({
     queryKey: ['candidates'],
     queryFn: () => jsonFetch('/api/candidates/'),
+    initialData: [],
   });
 
-  const candidates = Array.isArray(rawCandidates) ? rawCandidates : (rawCandidates?.results || []);
+  const candidates = Array.isArray(rawCandidates) ? rawCandidates : (Array.isArray(rawCandidates?.results) ? rawCandidates.results : []);
 
   const handleWaitlist = async (candidate) => {
     try {

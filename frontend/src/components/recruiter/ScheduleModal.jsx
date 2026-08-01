@@ -21,31 +21,36 @@ export default function ScheduleModal({ candidate, onClose, onScheduled }) {
     if (!date || !time) return toast.error('Please select date and time');
     setSaving(true);
 
-    const link = generateLink();
-    await jsonFetch('/api/interviews/', {
-      method: 'POST',
-      body: JSON.stringify({
-        candidate_id: candidate.id,
-        candidate_name: candidate.name,
-        role: candidate.target_role,
-        scheduled_date: `${date}T${time}:00`,
-        interview_link: link,
-        status: 'scheduled',
-        notes,
-      }),
-    });
-
-    if (candidate.id) {
-      await jsonFetch(`/api/candidates/${candidate.id}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'scheduled' }),
+    try {
+      const link = generateLink();
+      await jsonFetch('/api/interviews/', {
+        method: 'POST',
+        body: JSON.stringify({
+          candidate_id: candidate.id,
+          candidate_name: candidate.name,
+          role: candidate.target_role,
+          scheduled_date: `${date}T${time}:00`,
+          interview_link: link,
+          status: 'scheduled',
+          notes,
+        }),
       });
-    }
 
-    setSaving(false);
-    toast.success('Interview scheduled!');
-    onScheduled?.();
-    onClose();
+      if (candidate.id) {
+        await jsonFetch(`/api/candidates/${candidate.id}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'scheduled' }),
+        });
+      }
+
+      toast.success('Interview scheduled!');
+      onScheduled?.();
+      onClose();
+    } catch (err) {
+      toast.error(err?.message || 'Failed to schedule interview');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

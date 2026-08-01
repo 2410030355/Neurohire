@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, Brain, Sparkles, Shield, Users, BarChart3, Zap, Sun, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { useEffect } from 'react';
 
 const features = [
   { icon: Brain,    title: 'AI-Powered Analysis',  desc: 'Deep resume parsing with NLP and evidence-backed skill validation' },

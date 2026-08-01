@@ -89,7 +89,7 @@ export default function Chatbot({ role = 'recruiter' }) {
     fetch(`${API_BASE_URL}/api/chatbot/`, { credentials: 'include' })
       .then(r => r.json())
       .then(data => {
-        if (data.history && data.history.length > 0) {
+        if (data && typeof data === 'object' && Array.isArray(data.history) && data.history.length > 0) {
           setMessages(data.history.map(m => ({ ...m, typed: true })));
         } else {
           setMessages([{

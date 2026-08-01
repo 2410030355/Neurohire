@@ -25,7 +25,7 @@ async function jsonFetch(path, options = {}) {
   let data = null;
   try {
     if (text) data = JSON.parse(text);
-  } catch {
+  } catch (parseErr) {
     data = text;
   }
 
@@ -38,7 +38,7 @@ async function jsonFetch(path, options = {}) {
     throw error;
   }
 
-  return data || null;
+  return data !== undefined ? data : null;
 }
 
 export { API_BASE_URL, jsonFetch };

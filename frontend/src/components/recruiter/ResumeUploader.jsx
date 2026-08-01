@@ -52,7 +52,7 @@ export default function ResumeUploader({ onAnalysisComplete }) {
 
         const res = await fetch(`${API_BASE_URL}/api/upload-resume/`, {
           method: "POST",
-          // NO credentials:include — csrf_exempt handles this
+          credentials: 'include',
           // NO Content-Type header — browser sets multipart boundary automatically
           body: formData,
         });
