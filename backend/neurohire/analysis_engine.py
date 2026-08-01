@@ -4,17 +4,141 @@ import os
 import logging
 import requests
 import time
+import json
 from typing import Dict, List, Optional, Tuple
-from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+import threading
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Initialize Sentence Transformer model globally
+try:
+    semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+except Exception as e:
+    logger.error(f"Failed to load Sentence Transformer model: {e}")
+    semantic_model = None
+
 # ==============================
+# Adaptive Weight System
+# ==============================
+
+# Default weights and learning rate
+DEFAULT_WEIGHTS = {
+    'semantic_weight': 0.6,      # Semantic score (role match) weight
+    'analytical_weight': 0.4,    # Analytical score (consistency, skills, learning) weight
+}
+
+LEARNING_RATE = 0.05  # eta for weight updates
+
+# Current adaptive weights (loaded/persisted to file)
+current_weights = DEFAULT_WEIGHTS.copy()
+weights_lock = threading.Lock()  # Thread-safe updates
+
+WEIGHTS_FILE = os.path.join(os.path.dirname(__file__), 'adaptive_weights.json')
+
+
+def _load_weights_from_disk():
+    """Load adaptive weights from disk if available."""
+    global current_weights
+    if os.path.exists(WEIGHTS_FILE):
+        try:
+            with open(WEIGHTS_FILE, 'r') as f:
+                loaded = json.load(f)
+                current_weights = loaded
+                logger.info(f"Loaded adaptive weights from disk: {current_weights}")
+        except Exception as e:
+            logger.error(f"Failed to load weights file: {e}. Using defaults.")
+            current_weights = DEFAULT_WEIGHTS.copy()
+    else:
+        current_weights = DEFAULT_WEIGHTS.copy()
+
+
+def _save_weights_to_disk():
+    """Persist current weights to disk."""
+    try:
+        with open(WEIGHTS_FILE, 'w') as f:
+            json.dump(current_weights, f, indent=2)
+        logger.info(f"Saved adaptive weights to disk: {current_weights}")
+    except Exception as e:
+        logger.error(f"Failed to save weights file: {e}")
+
+
+def get_current_weights() -> Dict[str, float]:
+    """Get the current adaptive weights."""
+    with weights_lock:
+        return current_weights.copy()
+
+
+def update_weights(recruiter_decision: str, match_score: float = None):
+    """
+    Update adaptive weights based on recruiter decision.
+    
+    Formula: w = w + (eta * signal)
+    - decision in ['HIRE', 'ACCEPT'] -> signal = 1.0 (reinforce)
+    - decision in ['REJECT'] -> signal = -1.0 (penalize)
+    - decision in ['WAITLIST', 'HOLD'] -> signal = 0.0 (neutral)
+    
+    Then normalize so weights sum to 1.0.
+    
+    Args:
+        recruiter_decision: Decision type ('HIRE', 'ACCEPT', 'REJECT', 'WAITLIST', etc.)
+        match_score: Optional match_score to influence which weight gets adjusted more
+    """
+    global current_weights
+    
+    decision_normalized = recruiter_decision.strip().upper()
+    
+    # Map decision to signal
+    if decision_normalized in ['HIRE', 'ACCEPT']:
+        signal = 1.0
+    elif decision_normalized in ['REJECT']:
+        signal = -1.0
+    else:
+        # WAITLIST, HOLD, etc. don't update weights
+        logger.info(f"Decision '{decision_normalized}' does not trigger weight update.")
+        return
+    
+    with weights_lock:
+        # Adjust weights based on signal
+        # If signal is positive (hire) and match_score is high, reinforce semantic weight more
+        # If signal is negative (reject) and match_score is high, reduce semantic weight
+        adjustment = LEARNING_RATE * signal
+        
+        # Update both weights with the same adjustment
+        current_weights['semantic_weight'] += adjustment
+        current_weights['analytical_weight'] += adjustment
+        
+        # Clamp to reasonable bounds [0.1, 0.9] to prevent extreme skewing
+        current_weights['semantic_weight'] = np.clip(current_weights['semantic_weight'], 0.1, 0.9)
+        current_weights['analytical_weight'] = np.clip(current_weights['analytical_weight'], 0.1, 0.9)
+        
+        # Normalize so weights sum to 1.0
+        total = current_weights['semantic_weight'] + current_weights['analytical_weight']
+        current_weights['semantic_weight'] /= total
+        current_weights['analytical_weight'] /= total
+        
+        # Ensure sum is exactly 1.0 (handle floating point rounding)
+        current_weights['analytical_weight'] = round(1.0 - current_weights['semantic_weight'], 6)
+        
+        # Log the update
+        logger.info(
+            f"Weight update from '{decision_normalized}' (signal={signal}): "
+            f"semantic={current_weights['semantic_weight']:.4f}, "
+            f"analytical={current_weights['analytical_weight']:.4f}"
+        )
+        
+        # Persist to disk
+        _save_weights_to_disk()
+
+
+# Load weights on module initialization
+_load_weights_from_disk()
+
 # Skill Database (Expanded)
-# ==============================
 
 SKILL_KEYWORDS = [
     # Programming Languages
@@ -54,6 +178,42 @@ LEARNING_WORDS = [
     "managed", "delivered", "achieved", "spearheaded", "initiated",
     "enhanced", "streamlined", "automated", "deployed", "scaled"
 ]
+
+
+# ==============================
+# Sentence Transformer Utilities
+# ==============================
+
+def get_similarity_score(resume_text: str, job_description_text: str) -> float:
+    """
+    Compute semantic similarity between resume and job description using Sentence Transformers.
+    
+    Args:
+        resume_text: Full resume or job seeker profile text
+        job_description_text: Job description or target role text
+    
+    Returns:
+        Similarity score as a percentage (0-100)
+    """
+    if not semantic_model:
+        logger.warning("Sentence Transformer model not available, returning default score")
+        return 50.0
+    
+    if not resume_text or not job_description_text:
+        return 50.0
+    
+    try:
+        # Encode both texts to embeddings
+        resume_embedding = semantic_model.encode(resume_text.strip(), convert_to_numpy=True)
+        job_embedding = semantic_model.encode(job_description_text.strip(), convert_to_numpy=True)
+        
+        # Compute cosine similarity and convert to percentage
+        similarity = cosine_similarity([resume_embedding], [job_embedding])[0][0]
+        return float(similarity * 100)
+    except Exception as e:
+        logger.error(f"Error computing similarity score: {e}")
+        return 50.0
+
 
 # Email and phone regex patterns
 EMAIL_PATTERN = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
@@ -298,7 +458,7 @@ def compute_role_match(resume_text: str, target_role: str, skills: List[str],
     Role-Specific Suitability and Matching Analysis (paper §IV.E).
     If a full job description is provided, matches against that instead of
     just the role name — much richer signal.
-    Uses TF-IDF cosine similarity + skill overlap boost.
+    Uses Sentence Transformer embeddings + skill overlap boost.
     """
     # Use JD if provided, otherwise fall back to role name
     match_target = job_description.strip() if job_description and job_description.strip() else target_role
@@ -306,18 +466,8 @@ def compute_role_match(resume_text: str, target_role: str, skills: List[str],
     if not match_target:
         return 50.0
 
-    try:
-        corpus = [resume_text, match_target.lower()]
-        vectorizer = TfidfVectorizer(
-            stop_words='english',
-            max_features=200,
-            ngram_range=(1, 2)
-        )
-        tfidf_matrix = vectorizer.fit_transform(corpus)
-        semantic_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0] * 100
-    except Exception as e:
-        logger.warning(f"TF-IDF computation failed: {e}")
-        semantic_score = 30.0
+    # Compute semantic similarity using Sentence Transformers
+    semantic_score = get_similarity_score(resume_text, match_target.lower())
 
     # Skill overlap — check skills against JD words
     jd_words = set(match_target.lower().split())
@@ -464,12 +614,20 @@ def compute_analytical_score(consistency_score: float,
 
 
 def compute_final_score(semantic_score: float, analytical_score: float,
-                        alpha: float = 0.5, beta: float = 0.5) -> float:
+                        alpha: float = None, beta: float = None) -> float:
     """
-    Final Score (paper §IV.G):
-    FS = alpha * SS + beta * AS   (alpha=0.5, beta=0.5 by default)
-    Balances semantic relevance with structured analytical evaluation.
+    Final Score (paper §IV.G) with adaptive weights:
+    FS = alpha * SS + beta * AS
+    
+    If alpha/beta not provided, uses adaptive weights learned from recruiter decisions.
+    Default fallback: alpha=0.5, beta=0.5 (equal weighting).
     """
+    # Use adaptive weights if not explicitly provided
+    if alpha is None or beta is None:
+        weights = get_current_weights()
+        alpha = weights['semantic_weight']
+        beta = weights['analytical_weight']
+    
     return round(alpha * semantic_score + beta * analytical_score, 2)
 
 

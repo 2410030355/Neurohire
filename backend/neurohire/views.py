@@ -29,7 +29,7 @@ from .serializers import (
     InterviewSerializer,
     MockInterviewSerializer,
 )
-from .analysis_engine import analyze_resume, github_search_service
+from .analysis_engine import analyze_resume, github_search_service, update_weights, get_current_weights
 from .mongo_client import (
     mongo_insert_candidate, mongo_get_candidate,
     mongo_all_candidates, mongo_delete_all_candidates,
@@ -173,6 +173,46 @@ class AIDecisionLogViewSet(viewsets.ModelViewSet):
     serializer_class = AIDecisionLogSerializer
     permission_classes = [AllowAny]
     authentication_classes = []
+    
+    def create(self, request, *args, **kwargs):
+        """
+        Create an AIDecisionLog and trigger adaptive weight update.
+        """
+        response = super().create(request, *args, **kwargs)
+        
+        # Extract recruiter_decision and role_match_score from request
+        recruiter_decision = request.data.get('recruiter_decision')
+        role_match_score = request.data.get('role_match_score')
+        
+        if recruiter_decision:
+            # Trigger weight update based on recruiter decision
+            update_weights(recruiter_decision, match_score=role_match_score)
+            logger.info(f"Weights updated after '{recruiter_decision}' decision. "
+                       f"Current weights: {get_current_weights()}")
+        
+        return response
+    
+    def update(self, request, *args, **kwargs):
+        """
+        Update an AIDecisionLog and trigger adaptive weight update if decision changed.
+        """
+        # Get the old decision before update
+        instance = self.get_object()
+        old_decision = instance.recruiter_decision if instance else None
+        
+        response = super().update(request, *args, **kwargs)
+        
+        # Extract new recruiter_decision from request
+        recruiter_decision = request.data.get('recruiter_decision')
+        role_match_score = request.data.get('role_match_score')
+        
+        # Only update weights if decision actually changed
+        if recruiter_decision and recruiter_decision != old_decision:
+            update_weights(recruiter_decision, match_score=role_match_score)
+            logger.info(f"Weights updated after decision change from '{old_decision}' to '{recruiter_decision}'. "
+                       f"Current weights: {get_current_weights()}")
+        
+        return response
 
 
 class InterviewViewSet(viewsets.ModelViewSet):
