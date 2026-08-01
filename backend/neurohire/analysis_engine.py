@@ -8,7 +8,6 @@ import json
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
 import threading
 
 # Setup logging
@@ -16,11 +15,29 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize Sentence Transformer model globally
-try:
-    semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
-except Exception as e:
-    logger.error(f"Failed to load Sentence Transformer model: {e}")
-    semantic_model = None
+semantic_model = None
+semantic_model_lock = threading.Lock()
+
+
+def _get_semantic_model():
+    """Load the Sentence Transformer model lazily on first use."""
+    global semantic_model
+    if semantic_model is not None:
+        return semantic_model
+
+    with semantic_model_lock:
+        if semantic_model is not None:
+            return semantic_model
+
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+            return semantic_model
+        except Exception as e:
+            logger.error(f"Failed to load Sentence Transformer model: {e}")
+            semantic_model = None
+            return None
 
 # ==============================
 # Adaptive Weight System
@@ -195,7 +212,9 @@ def get_similarity_score(resume_text: str, job_description_text: str) -> float:
     Returns:
         Similarity score as a percentage (0-100)
     """
-    if not semantic_model:
+    model = _get_semantic_model()
+
+    if not model:
         logger.warning("Sentence Transformer model not available, returning default score")
         return 50.0
     
@@ -204,8 +223,8 @@ def get_similarity_score(resume_text: str, job_description_text: str) -> float:
     
     try:
         # Encode both texts to embeddings
-        resume_embedding = semantic_model.encode(resume_text.strip(), convert_to_numpy=True)
-        job_embedding = semantic_model.encode(job_description_text.strip(), convert_to_numpy=True)
+        resume_embedding = model.encode(resume_text.strip(), convert_to_numpy=True)
+        job_embedding = model.encode(job_description_text.strip(), convert_to_numpy=True)
         
         # Compute cosine similarity and convert to percentage
         similarity = cosine_similarity([resume_embedding], [job_embedding])[0][0]

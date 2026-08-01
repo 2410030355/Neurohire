@@ -2,7 +2,7 @@ services:
   - type: web
     name: neurohire-backend
     runtime: python
-    startCommand: "gunicorn backend.wsgi --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+    startCommand: "gunicorn backend.wsgi --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120"
     buildCommand: "pip install -r requirements.txt && python manage.py migrate --run-syncdb"
     rootDir: backend
     plan: standard
