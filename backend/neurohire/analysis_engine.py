@@ -39,6 +39,131 @@ def _get_semantic_model():
             semantic_model = None
             return None
 
+
+# ==============================
+# Gemini Structured Extraction
+# ==============================
+
+# Lazy, thread-safe client init (mirrors the semantic model pattern above)
+gemini_client = None
+gemini_client_lock = threading.Lock()
+
+GEMINI_MODEL_PRIMARY = 'gemini-2.5-flash'
+GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash'
+GEMINI_TIMEOUT_SECONDS = 15  # keep tight — this runs inline in the upload request
+
+
+def _get_gemini_client():
+    """
+    Load the Gemini client lazily on first use.
+    Returns None (never raises) if the SDK is missing or no API key is configured —
+    callers must treat None as "fall back to regex extraction".
+    """
+    global gemini_client
+    if gemini_client is not None:
+        return gemini_client
+
+    with gemini_client_lock:
+        if gemini_client is not None:
+            return gemini_client
+
+        try:
+            from django.conf import settings
+            api_key = getattr(settings, 'GEMINI_API_KEY', None) or os.environ.get('GEMINI_API_KEY')
+        except Exception:
+            api_key = os.environ.get('GEMINI_API_KEY')
+
+        if not api_key:
+            logger.warning("GEMINI_API_KEY not configured — Gemini extraction disabled, using regex fallback.")
+            gemini_client = None
+            return None
+
+        try:
+            from google.genai import Client
+            gemini_client = Client(api_key=api_key)
+            return gemini_client
+        except Exception as e:
+            logger.error(f"Failed to initialise Gemini client: {e}")
+            gemini_client = None
+            return None
+
+
+GEMINI_EXTRACTION_PROMPT = (
+    "Extract candidate information from this resume text into valid JSON with keys: "
+    "name, email, skills (list), experience_years (int), education (list). "
+    "Return ONLY the JSON object, no markdown fences, no commentary.\n\n"
+    "Resume text:\n{text}"
+)
+
+
+def _clean_json_response(raw_text: str) -> str:
+    """Strip markdown code fences if the model wraps its JSON despite instructions."""
+    cleaned = raw_text.strip()
+    if cleaned.startswith('```'):
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+    return cleaned.strip()
+
+
+def extract_with_gemini(text_original: str) -> Optional[Dict]:
+    """
+    Structured resume-field extraction via the Gemini API.
+
+    Returns a dict with keys: name, email, skills, experience_years, education
+    on success, or None on any failure (missing key, SDK error, timeout,
+    malformed JSON) — callers must fall back to the regex extractor.
+    Never raises.
+    """
+    client = _get_gemini_client()
+    if client is None:
+        return None
+
+    if not text_original or not text_original.strip():
+        return None
+
+    # Cap input length — long resumes don't need more than ~6000 chars of
+    # context for field extraction, and it keeps latency/cost predictable.
+    trimmed_text = text_original.strip()[:6000]
+    prompt = GEMINI_EXTRACTION_PROMPT.format(text=trimmed_text)
+
+    for model_name in (GEMINI_MODEL_PRIMARY, GEMINI_MODEL_FALLBACK):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+
+            raw_text = getattr(response, 'text', None)
+            if not raw_text:
+                logger.warning(f"Gemini ({model_name}) returned an empty response.")
+                continue
+
+            parsed = json.loads(_clean_json_response(raw_text))
+
+            # Normalise / validate shape so downstream code can rely on it
+            result = {
+                'name': parsed.get('name') or None,
+                'email': parsed.get('email') or None,
+                'skills': parsed.get('skills') if isinstance(parsed.get('skills'), list) else [],
+                'experience_years': float(parsed.get('experience_years') or 0),
+                'education': parsed.get('education') if isinstance(parsed.get('education'), list) else (
+                    [parsed.get('education')] if parsed.get('education') else []
+                ),
+            }
+            logger.info(f"Gemini extraction succeeded using {model_name}.")
+            return result
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Gemini ({model_name}) returned invalid JSON: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"Gemini extraction failed on {model_name}: {e}")
+            continue
+
+    # Both models failed
+    return None
+
+
 # ==============================
 # Adaptive Weight System
 # ==============================
@@ -93,22 +218,22 @@ def get_current_weights() -> Dict[str, float]:
 def update_weights(recruiter_decision: str, match_score: float = None):
     """
     Update adaptive weights based on recruiter decision.
-    
+
     Formula: w = w + (eta * signal)
     - decision in ['HIRE', 'ACCEPT'] -> signal = 1.0 (reinforce)
     - decision in ['REJECT'] -> signal = -1.0 (penalize)
     - decision in ['WAITLIST', 'HOLD'] -> signal = 0.0 (neutral)
-    
+
     Then normalize so weights sum to 1.0.
-    
+
     Args:
         recruiter_decision: Decision type ('HIRE', 'ACCEPT', 'REJECT', 'WAITLIST', etc.)
         match_score: Optional match_score to influence which weight gets adjusted more
     """
     global current_weights
-    
+
     decision_normalized = recruiter_decision.strip().upper()
-    
+
     # Map decision to signal
     if decision_normalized in ['HIRE', 'ACCEPT']:
         signal = 1.0
@@ -118,36 +243,34 @@ def update_weights(recruiter_decision: str, match_score: float = None):
         # WAITLIST, HOLD, etc. don't update weights
         logger.info(f"Decision '{decision_normalized}' does not trigger weight update.")
         return
-    
+
     with weights_lock:
         # Adjust weights based on signal
-        # If signal is positive (hire) and match_score is high, reinforce semantic weight more
-        # If signal is negative (reject) and match_score is high, reduce semantic weight
         adjustment = LEARNING_RATE * signal
-        
+
         # Update both weights with the same adjustment
         current_weights['semantic_weight'] += adjustment
         current_weights['analytical_weight'] += adjustment
-        
+
         # Clamp to reasonable bounds [0.1, 0.9] to prevent extreme skewing
         current_weights['semantic_weight'] = np.clip(current_weights['semantic_weight'], 0.1, 0.9)
         current_weights['analytical_weight'] = np.clip(current_weights['analytical_weight'], 0.1, 0.9)
-        
+
         # Normalize so weights sum to 1.0
         total = current_weights['semantic_weight'] + current_weights['analytical_weight']
         current_weights['semantic_weight'] /= total
         current_weights['analytical_weight'] /= total
-        
+
         # Ensure sum is exactly 1.0 (handle floating point rounding)
         current_weights['analytical_weight'] = round(1.0 - current_weights['semantic_weight'], 6)
-        
+
         # Log the update
         logger.info(
             f"Weight update from '{decision_normalized}' (signal={signal}): "
             f"semantic={current_weights['semantic_weight']:.4f}, "
             f"analytical={current_weights['analytical_weight']:.4f}"
         )
-        
+
         # Persist to disk
         _save_weights_to_disk()
 
@@ -204,11 +327,11 @@ LEARNING_WORDS = [
 def get_similarity_score(resume_text: str, job_description_text: str) -> float:
     """
     Compute semantic similarity between resume and job description using Sentence Transformers.
-    
+
     Args:
         resume_text: Full resume or job seeker profile text
         job_description_text: Job description or target role text
-    
+
     Returns:
         Similarity score as a percentage (0-100)
     """
@@ -217,15 +340,22 @@ def get_similarity_score(resume_text: str, job_description_text: str) -> float:
     if not model:
         logger.warning("Sentence Transformer model not available, returning default score")
         return 50.0
-    
+
     if not resume_text or not job_description_text:
         return 50.0
-    
+
+    # Cap input length before encoding — mirrors the Gemini extraction cap.
+    # A very long resume/JD creates a much bigger tensor during tokenization,
+    # which spikes peak memory on exactly the requests most likely to push
+    # a memory-constrained instance (e.g. Render's smaller tiers) over its limit.
+    resume_text = resume_text.strip()[:6000]
+    job_description_text = job_description_text.strip()[:6000]
+
     try:
         # Encode both texts to embeddings
-        resume_embedding = model.encode(resume_text.strip(), convert_to_numpy=True)
-        job_embedding = model.encode(job_description_text.strip(), convert_to_numpy=True)
-        
+        resume_embedding = model.encode(resume_text, convert_to_numpy=True)
+        job_embedding = model.encode(job_description_text, convert_to_numpy=True)
+
         # Compute cosine similarity and convert to percentage
         similarity = cosine_similarity([resume_embedding], [job_embedding])[0][0]
         return float(similarity * 100)
@@ -455,11 +585,6 @@ def compute_learning_velocity_score(skills: List[str], experience_years: float) 
     Learning Velocity numeric score (paper §IV.E3).
     Formula: LV = new_skills_count / max(1, years)
     Normalised 0-100 using typical range cap of 10 skills/year as max.
-
-    In the absence of timestamped skill acquisition data (not available
-    from static resumes), we approximate "new skills" as total detected
-    skills and normalise against experience years — consistent with
-    the paper's min-max normalisation approach.
     """
     if experience_years <= 0:
         experience_years = 1.0
@@ -475,27 +600,20 @@ def compute_role_match(resume_text: str, target_role: str, skills: List[str],
                        job_description: str = "") -> float:
     """
     Role-Specific Suitability and Matching Analysis (paper §IV.E).
-    If a full job description is provided, matches against that instead of
-    just the role name — much richer signal.
     Uses Sentence Transformer embeddings + skill overlap boost.
     """
-    # Use JD if provided, otherwise fall back to role name
     match_target = job_description.strip() if job_description and job_description.strip() else target_role
 
     if not match_target:
         return 50.0
 
-    # Compute semantic similarity using Sentence Transformers
     semantic_score = get_similarity_score(resume_text, match_target.lower())
 
-    # Skill overlap — check skills against JD words
     jd_words = set(match_target.lower().split())
     resume_skills = set(skills)
     skill_overlap = sum(1 for s in resume_skills if any(w in s for w in jd_words))
     skill_bonus = min(30, skill_overlap * 8)
 
-    # If full JD given: 70% semantic (richer signal), 30% skill
-    # If just role name: 60% semantic, 40% skill
     if job_description and job_description.strip():
         final_score = (0.70 * semantic_score) + (0.30 * (50 + skill_bonus))
     else:
@@ -507,13 +625,10 @@ def compute_role_match(resume_text: str, target_role: str, skills: List[str],
 def compute_consistency_score(skills: List[str], experience_years: float) -> float:
     """
     Cross-document consistency analysis (paper §IV.A).
-    Detects contradictions between claimed skills and experience level.
-    Deducts points per detected inconsistency.
     """
     score = 100.0
     skills_lower = [s.lower() for s in skills]
 
-    # Check 1: Senior skills with very low experience
     senior_skills = [
         'kubernetes', 'terraform', 'system design', 'distributed systems',
         'kafka', 'grpc', 'microservices', 'architect'
@@ -522,18 +637,15 @@ def compute_consistency_score(skills: List[str], experience_years: float) -> flo
     if has_senior and experience_years < 1.5:
         score -= 20
 
-    # Check 2: Too many skills for experience level
     expected_max_skills = max(6, experience_years * 4)
     if len(skills) > expected_max_skills:
         score -= 12
 
-    # Check 3: Advanced tools without foundational skills
     advanced = {'kubernetes', 'terraform', 'kafka', 'pytorch', 'tensorflow'}
     foundational = {'python', 'javascript', 'java', 'git', 'sql', 'linux'}
     if bool(advanced & set(skills_lower)) and not bool(foundational & set(skills_lower)):
         score -= 15
 
-    # Check 4: High experience but almost no skills detected
     if experience_years >= 3 and len(skills) < 4:
         score -= 18
 
@@ -543,8 +655,6 @@ def compute_consistency_score(skills: List[str], experience_years: float) -> flo
 def validate_skills_from_text(skills: List[str], text_lower: str) -> List[dict]:
     """
     Evidence-backed skill validation (paper §IV.B).
-    Classifies each skill as Valid / Partial / Unverified
-    based on contextual evidence in the resume text.
     """
     ACTION_VERBS = [
         'built', 'developed', 'designed', 'implemented', 'deployed',
@@ -575,32 +685,20 @@ def validate_skills_from_text(skills: List[str], text_lower: str) -> List[dict]:
 
 
 def compute_skill_validation_score(skills: List[str], learning_velocity: str) -> float:
-    """
-    Validate skills based on quantity and learning indicators.
-    """
+    """Validate skills based on quantity and learning indicators."""
     base_score = 40
-
-    # Skill count bonus (max 40 points)
     skill_bonus = min(40, len(skills) * 4)
-
-    # Learning velocity bonus (max 20 points)
     velocity_bonus = {"High": 20, "Medium": 10, "Low": 5}.get(learning_velocity, 5)
-
     total = base_score + skill_bonus + velocity_bonus
     return round(min(100, total), 2)
 
 
 def compute_resume_strength_score(skills: List[str], education: Optional[str],
                                   experience_years: float) -> float:
-    """
-    Overall resume strength based on completeness and quality.
-    """
+    """Overall resume strength based on completeness and quality."""
     base_score = 30
-
-    # Skills bonus (max 35 points)
     skill_bonus = min(35, len(skills) * 3)
 
-    # Education bonus (max 20 points)
     education_bonus = 0
     if education:
         education_levels = {
@@ -613,7 +711,6 @@ def compute_resume_strength_score(skills: List[str], education: Optional[str],
         }
         education_bonus = education_levels.get(education, 5)
 
-    # Experience bonus (max 15 points)
     experience_bonus = min(15, experience_years * 2)
 
     total = base_score + skill_bonus + education_bonus + experience_bonus
@@ -624,10 +721,7 @@ def compute_analytical_score(consistency_score: float,
                              skill_validation_score: float,
                              lv_score: float) -> float:
     """
-    Analytical Score (paper §IV.F):
-    AS = (CS + VS + LV) / 3
-    Each component equally weighted to provide unbiased analysis.
-    All inputs are on 0-100 scale.
+    Analytical Score (paper §IV.F): AS = (CS + VS + LV) / 3
     """
     return round((consistency_score + skill_validation_score + lv_score) / 3, 2)
 
@@ -635,18 +729,13 @@ def compute_analytical_score(consistency_score: float,
 def compute_final_score(semantic_score: float, analytical_score: float,
                         alpha: float = None, beta: float = None) -> float:
     """
-    Final Score (paper §IV.G) with adaptive weights:
-    FS = alpha * SS + beta * AS
-    
-    If alpha/beta not provided, uses adaptive weights learned from recruiter decisions.
-    Default fallback: alpha=0.5, beta=0.5 (equal weighting).
+    Final Score (paper §IV.G) with adaptive weights: FS = alpha * SS + beta * AS
     """
-    # Use adaptive weights if not explicitly provided
     if alpha is None or beta is None:
         weights = get_current_weights()
         alpha = weights['semantic_weight']
         beta = weights['analytical_weight']
-    
+
     return round(alpha * semantic_score + beta * analytical_score, 2)
 
 
@@ -687,45 +776,66 @@ def generate_career_trajectory(skills: List[str], learning_velocity: str,
 
 def analyze_resume(file_path: str, target_role: str = "", job_description: str = "") -> Dict:
     """
-    Main function to analyze a resume PDF and extract comprehensive insights.
+    Main function to analyze a resume PDF/DOCX and extract comprehensive insights.
+
+    Extraction strategy: try Gemini structured extraction first (name, email,
+    skills, experience_years, education). If it fails for any reason — no API
+    key, SDK error, timeout, malformed JSON — silently fall back to the
+    original regex-based extractors. Phone and all scoring always run
+    against the locally extracted text regardless of which path was used,
+    since Gemini's schema doesn't include phone and the scoring functions
+    need the raw text either way.
 
     Args:
-        file_path: Path to the PDF resume file
+        file_path: Path to the resume file (PDF or DOCX)
         target_role: Target job role for matching (optional)
+        job_description: Full job description text for richer matching (optional)
 
     Returns:
         Dict containing all analysis results
 
     Raises:
         FileNotFoundError: If file doesn't exist
-        ValueError: If file is not a PDF or contains no text
+        ValueError: If file is not a PDF/DOCX or contains no text
         Exception: For other processing errors
     """
     try:
-        # Extract text (both lowercase and original case)
+        # Extract text (both lowercase and original case) — always needed,
+        # regardless of extraction path, for scoring and phone lookup.
         text_lower, text_original = extract_text_from_pdf(file_path)
 
-        # Extract basic information
-        name = extract_name(text_original)
-        email = extract_email(text_original)
+        # ── Try Gemini structured extraction first ──────────────────────
+        gemini_result = extract_with_gemini(text_original)
+
+        if gemini_result:
+            name = gemini_result['name']
+            email = gemini_result['email']
+            skills = [s.lower() for s in gemini_result['skills']] or extract_skills(text_lower)
+            experience_years = gemini_result['experience_years'] or extract_experience(text_lower)
+            education_list = gemini_result['education']
+            education = education_list[0] if education_list else extract_education(text_lower)
+            extraction_method = 'gemini'
+        else:
+            name = extract_name(text_original)
+            email = extract_email(text_original)
+            skills = extract_skills(text_lower)
+            experience_years = extract_experience(text_lower)
+            education = extract_education(text_lower)
+            extraction_method = 'regex'
+
+        # Phone isn't part of the Gemini schema — always regex
         phone = extract_phone(text_original)
 
-        # Extract skills and learning indicators
-        skills = extract_skills(text_lower)
+        # Learning velocity label still runs off raw text keyword frequency
         learning_velocity = compute_learning_velocity(text_lower)
 
-        # Extract experience and education
-        experience_years = extract_experience(text_lower)
-        education = extract_education(text_lower)
-
-        # ── Semantic Similarity Score (SS) — paper §IV.C/D ──────────────────
+        # ── Semantic Similarity Score (SS) — paper §IV.C/D ──────────────
         role_score = compute_role_match(text_lower, target_role, skills, job_description)
 
-        # ── Analytical Score components — paper §IV.E ─────────────────────
+        # ── Analytical Score components — paper §IV.E ───────────────────
         consistency_score = compute_consistency_score(skills, experience_years)
         resume_strength_score = compute_resume_strength_score(skills, education, experience_years)
 
-        # Evidence-backed skill validation (paper §IV.B / §IV.E2)
         validated_skills = validate_skills_from_text(skills, text_lower)
         valid_count = sum(1 for v in validated_skills if v['status'] == 'Valid')
         skill_validation_score = (
@@ -734,25 +844,19 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
             compute_skill_validation_score(skills, learning_velocity)
         )
 
-        # Learning Velocity numeric score (paper §IV.E3)
         lv_score = compute_learning_velocity_score(skills, experience_years)
 
-        # Analytical Score AS = (CS + VS + LV) / 3 (paper §IV.F)
         analytical_score = compute_analytical_score(
             consistency_score, skill_validation_score, lv_score
         )
 
-        # Final Score FS = 0.5 * SS + 0.5 * AS (paper §IV.G)
         final_score = compute_final_score(role_score, analytical_score)
         final_fit = compute_final_fit(final_score)
 
-        # Generate career insights
         career_trajectory = generate_career_trajectory(skills, learning_velocity, experience_years)
 
-        # Identify missing skills (from top skills not in resume)
         missing_skills = [s for s in SKILL_KEYWORDS[:50] if s not in skills][:8]
 
-        # Generate explainability text (paper §III.D — transparency)
         jd_note = " Matched against full job description." if job_description and job_description.strip() else ""
         explainability = (
             f"Semantic match: {role_score:.0f}%.{jd_note} "
@@ -764,13 +868,12 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
             f"{experience_years:.1f} years of experience."
         )
 
-        # Profile summary
         profile_summary = (
             f"{name or 'Candidate'} - {education or 'Education not specified'} | "
             f"{len(skills)} skills | {experience_years:.1f} years experience"
         )
 
-        logger.info(f"Successfully analyzed resume: {name or 'Unknown'}")
+        logger.info(f"Successfully analyzed resume: {name or 'Unknown'} (extraction: {extraction_method})")
 
         return {
             # Basic Information
@@ -810,9 +913,12 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
 
             # Evidence-backed skill validation (paper §IV.B)
             "validated_skills": validated_skills,
+
+            # Which extraction path produced name/email/skills/experience/education
+            "extraction_method": extraction_method,
         }
 
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         logger.error(f"File not found: {file_path}")
         raise
     except ValueError as e:
@@ -827,38 +933,24 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
 # GitHub Candidate Search Service
 # ==============================
 
-# GitHub API Configuration
 GITHUB_API_BASE = "https://api.github.com"
 GITHUB_SEARCH_USERS = f"{GITHUB_API_BASE}/search/users"
 GITHUB_USER_REPOS = f"{GITHUB_API_BASE}/users/{{username}}/repos"
 GITHUB_USER_PROFILE = f"{GITHUB_API_BASE}/users/{{username}}"
 
-# Rate limiting and timeout configs
-GITHUB_REQUEST_TIMEOUT = 10  # seconds
-GITHUB_RATE_LIMIT_DELAY = 1  # seconds between requests
-MAX_REPOS_TO_ANALYZE = 30  # limit repos per user for performance
+GITHUB_REQUEST_TIMEOUT = 10
+GITHUB_RATE_LIMIT_DELAY = 1
+MAX_REPOS_TO_ANALYZE = 30
 
 
 def _make_github_request(url: str, params: Optional[Dict] = None,
                          timeout: int = GITHUB_REQUEST_TIMEOUT) -> Optional[Dict]:
-    """
-    Make a request to GitHub API with error handling and rate limiting.
-
-    Args:
-        url: GitHub API endpoint URL
-        params: Query parameters
-        timeout: Request timeout in seconds
-
-    Returns:
-        JSON response as dict or None on error
-    """
     try:
         headers = {
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'NeuroHire-Recruiter-Platform'
         }
 
-        # Add authentication if available (optional but recommended)
         github_token = os.environ.get('GITHUB_TOKEN')
         if github_token:
             headers['Authorization'] = f'token {github_token}'
@@ -870,7 +962,6 @@ def _make_github_request(url: str, params: Optional[Dict] = None,
             timeout=timeout
         )
 
-        # Check rate limit
         if response.status_code == 403:
             rate_limit_remaining = response.headers.get('X-RateLimit-Remaining', '0')
             if rate_limit_remaining == '0':
@@ -878,12 +969,8 @@ def _make_github_request(url: str, params: Optional[Dict] = None,
                 logger.warning(f"GitHub API rate limit exceeded. Resets at: {reset_time}")
                 return None
 
-        # Raise for bad status codes
         response.raise_for_status()
-
-        # Respect rate limiting
         time.sleep(GITHUB_RATE_LIMIT_DELAY)
-
         return response.json()
 
     except requests.exceptions.Timeout:
@@ -898,20 +985,9 @@ def _make_github_request(url: str, params: Optional[Dict] = None,
 
 
 def _extract_languages_from_repos(username: str, max_repos: int = MAX_REPOS_TO_ANALYZE) -> Dict[str, int]:
-    """
-    Extract programming languages from a user's repositories.
-
-    Args:
-        username: GitHub username
-        max_repos: Maximum number of repos to analyze
-
-    Returns:
-        Dict of language -> byte count
-    """
     languages_aggregate = {}
 
     try:
-        # Get user's repositories
         repos_url = GITHUB_USER_REPOS.format(username=username)
         params = {
             'sort': 'updated',
@@ -923,10 +999,9 @@ def _extract_languages_from_repos(username: str, max_repos: int = MAX_REPOS_TO_A
         if not repos_data:
             return languages_aggregate
 
-        # Aggregate languages from repos
         for repo in repos_data[:max_repos]:
             if repo.get('fork', False):
-                continue  # Skip forked repos
+                continue
 
             language = repo.get('language')
             if language:
@@ -940,16 +1015,6 @@ def _extract_languages_from_repos(username: str, max_repos: int = MAX_REPOS_TO_A
 
 
 def _get_top_languages(languages_dict: Dict[str, int], top_n: int = 5) -> List[str]:
-    """
-    Get top N languages sorted by usage count.
-
-    Args:
-        languages_dict: Dict of language -> count
-        top_n: Number of top languages to return
-
-    Returns:
-        List of top language names
-    """
     if not languages_dict:
         return []
 
@@ -963,16 +1028,6 @@ def _get_top_languages(languages_dict: Dict[str, int], top_n: int = 5) -> List[s
 
 
 def _format_github_user(user_data: Dict, languages: List[str]) -> Dict:
-    """
-    Format GitHub user data into clean structured response.
-
-    Args:
-        user_data: Raw GitHub user data
-        languages: List of programming languages
-
-    Returns:
-        Formatted user dict
-    """
     return {
         'username': user_data.get('login', ''),
         'profile_url': user_data.get('html_url', ''),
@@ -992,38 +1047,22 @@ def _format_github_user(user_data: Dict, languages: List[str]) -> Dict:
 
 
 def _calculate_github_profile_score(user_data: Dict, languages: List[str]) -> float:
-    """
-    Calculate a profile quality score for GitHub user.
-
-    Args:
-        user_data: GitHub user data
-        languages: List of languages
-
-    Returns:
-        Score between 0-100
-    """
     score = 0.0
 
-    # Public repos (max 30 points)
     repos = user_data.get('public_repos', 0)
     score += min(30, repos * 1.5)
 
-    # Followers (max 25 points)
     followers = user_data.get('followers', 0)
     score += min(25, followers * 0.5)
 
-    # Languages diversity (max 20 points)
     score += min(20, len(languages) * 4)
 
-    # Has bio (10 points)
     if user_data.get('bio'):
         score += 10
 
-    # Has company (8 points)
     if user_data.get('company'):
         score += 8
 
-    # Has location (7 points)
     if user_data.get('location'):
         score += 7
 
@@ -1031,36 +1070,7 @@ def _calculate_github_profile_score(user_data: Dict, languages: List[str]) -> fl
 
 
 def github_search_service(query: str, max_results: int = 10) -> Dict:
-    """
-    Search GitHub users by skills/keywords with comprehensive data extraction.
-
-    This is a production-ready service that:
-    - Searches GitHub users via REST API
-    - Handles pagination and rate limiting
-    - Extracts profile data and programming languages
-    - Returns clean structured JSON
-    - Includes proper error handling and timeouts
-
-    Args:
-        query: Search query (e.g., "python django", "machine learning")
-        max_results: Maximum number of results to return (default: 10, max: 100)
-
-    Returns:
-        Dict containing:
-        - success: bool
-        - data: List of formatted user dicts
-        - total_count: Total matching users on GitHub
-        - query: Original search query
-        - error: Error message if failed
-
-    Example:
-        >>> result = github_search_service("python developer", max_results=5)
-        >>> if result['success']:
-        >>>     for user in result['data']:
-        >>>         print(f"{user['username']}: {user['top_languages']}")
-    """
     try:
-        # Validate inputs
         if not query or not query.strip():
             return {
                 'success': False,
@@ -1070,16 +1080,14 @@ def github_search_service(query: str, max_results: int = 10) -> Dict:
                 'query': query
             }
 
-        # Limit max results to reasonable number
         max_results = min(max_results, 100)
 
         logger.info(f"GitHub search initiated: query='{query}', max_results={max_results}")
 
-        # Search for users
         search_params = {
             'q': query,
             'per_page': max_results,
-            'sort': 'followers',  # Sort by followers for quality results
+            'sort': 'followers',
             'order': 'desc'
         }
 
@@ -1099,26 +1107,21 @@ def github_search_service(query: str, max_results: int = 10) -> Dict:
 
         logger.info(f"Found {total_count} users, processing {len(users)} results")
 
-        # Process each user
         formatted_users = []
         for user in users:
             username = user.get('login')
             if not username:
                 continue
 
-            # Get detailed user profile
             profile_url = GITHUB_USER_PROFILE.format(username=username)
             user_details = _make_github_request(profile_url)
 
             if not user_details:
-                # Use basic data if detailed fetch fails
                 user_details = user
 
-            # Extract languages from repositories
             languages_dict = _extract_languages_from_repos(username)
             top_languages = _get_top_languages(languages_dict)
 
-            # Format user data
             formatted_user = _format_github_user(user_details, top_languages)
             formatted_users.append(formatted_user)
 
