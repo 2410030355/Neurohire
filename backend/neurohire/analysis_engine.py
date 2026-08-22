@@ -14,30 +14,12 @@ import threading
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Sentence Transformer model globally
-semantic_model = None
-semantic_model_lock = threading.Lock()
-
-
-def _get_semantic_model():
-    """Load the Sentence Transformer model lazily on first use."""
-    global semantic_model
-    if semantic_model is not None:
-        return semantic_model
-
-    with semantic_model_lock:
-        if semantic_model is not None:
-            return semantic_model
-
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
-            return semantic_model
-        except Exception as e:
-            logger.error(f"Failed to load Sentence Transformer model: {e}")
-            semantic_model = None
-            return None
+# Semantic similarity is computed via the Gemini embedding API (see
+# get_similarity_score below), not a locally loaded model — this removes
+# PyTorch/Sentence-Transformers from the process entirely, which was the
+# single largest memory consumer on constrained hosting (e.g. Render Free).
+# TfidfVectorizer (below, in get_similarity_score) is the offline fallback
+# if the Gemini embedding call fails for any reason.
 
 
 # ==============================
@@ -328,9 +310,63 @@ LEARNING_WORDS = [
 # Sentence Transformer Utilities
 # ==============================
 
+GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001'
+
+
+def _get_gemini_embedding(text: str) -> Optional[np.ndarray]:
+    """
+    Get a single text embedding via the Gemini API.
+    Returns None on any failure (no client, API error, malformed response) —
+    caller must fall back to TF-IDF. Never raises.
+    """
+    client = _get_gemini_client()
+    if client is None:
+        return None
+
+    try:
+        response = client.models.embed_content(
+            model=GEMINI_EMBEDDING_MODEL,
+            contents=text,
+        )
+        embeddings = getattr(response, 'embeddings', None)
+        if not embeddings:
+            return None
+        values = getattr(embeddings[0], 'values', None)
+        if not values:
+            return None
+        return np.array(values)
+    except Exception as e:
+        logger.error(f"Gemini embedding request failed: {e}")
+        return None
+
+
+def _tfidf_similarity(resume_text: str, job_description_text: str) -> float:
+    """
+    Lightweight offline fallback for semantic similarity — no model download,
+    no torch, minimal memory footprint. Used when the Gemini embedding call
+    is unavailable (no API key, network error, rate limit, etc).
+    """
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        vectorizer = TfidfVectorizer(stop_words='english')
+        tfidf_matrix = vectorizer.fit_transform([resume_text, job_description_text])
+        similarity = cosine_similarity(tfidf_matrix[0], tfidf_matrix[1])[0][0]
+        return float(similarity * 100)
+    except Exception as e:
+        logger.error(f"TF-IDF fallback similarity failed: {e}")
+        return 50.0
+
+
 def get_similarity_score(resume_text: str, job_description_text: str) -> float:
     """
-    Compute semantic similarity between resume and job description using Sentence Transformers.
+    Compute semantic similarity between resume and job description.
+
+    Tries the Gemini embedding API first (no local model — keeps the process
+    memory footprint small). Falls back to a lightweight TF-IDF cosine
+    similarity (scikit-learn, already a dependency) if the Gemini call fails
+    for any reason — no API key, network error, rate limit, malformed
+    response — so this function never hard-fails and never needs PyTorch.
 
     Args:
         resume_text: Full resume or job seeker profile text
@@ -339,33 +375,27 @@ def get_similarity_score(resume_text: str, job_description_text: str) -> float:
     Returns:
         Similarity score as a percentage (0-100)
     """
-    model = _get_semantic_model()
-
-    if not model:
-        logger.warning("Sentence Transformer model not available, returning default score")
-        return 50.0
-
     if not resume_text or not job_description_text:
         return 50.0
 
-    # Cap input length before encoding — mirrors the Gemini extraction cap.
-    # A very long resume/JD creates a much bigger tensor during tokenization,
-    # which spikes peak memory on exactly the requests most likely to push
-    # a memory-constrained instance (e.g. Render's smaller tiers) over its limit.
+    # Cap input length — keeps request size and latency predictable, and
+    # mirrors the same cap already applied to the Gemini extraction call.
     resume_text = resume_text.strip()[:6000]
     job_description_text = job_description_text.strip()[:6000]
 
-    try:
-        # Encode both texts to embeddings
-        resume_embedding = model.encode(resume_text, convert_to_numpy=True)
-        job_embedding = model.encode(job_description_text, convert_to_numpy=True)
+    resume_embedding = _get_gemini_embedding(resume_text)
+    job_embedding = _get_gemini_embedding(job_description_text)
 
-        # Compute cosine similarity and convert to percentage
-        similarity = cosine_similarity([resume_embedding], [job_embedding])[0][0]
-        return float(similarity * 100)
-    except Exception as e:
-        logger.error(f"Error computing similarity score: {e}")
-        return 50.0
+    if resume_embedding is not None and job_embedding is not None:
+        try:
+            similarity = cosine_similarity([resume_embedding], [job_embedding])[0][0]
+            return float(similarity * 100)
+        except Exception as e:
+            logger.error(f"Error computing Gemini embedding similarity: {e}")
+            # fall through to TF-IDF below
+
+    logger.info("Gemini embeddings unavailable — using TF-IDF fallback for similarity score.")
+    return _tfidf_similarity(resume_text, job_description_text)
 
 
 # Email and phone regex patterns
