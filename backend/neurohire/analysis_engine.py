@@ -48,8 +48,12 @@ def _get_semantic_model():
 gemini_client = None
 gemini_client_lock = threading.Lock()
 
-GEMINI_MODEL_PRIMARY = 'gemini-2.5-flash'
-GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash'
+# gemini-2.5-flash and gemini-2.0-flash were both deprecated by Google after
+# this code was originally written (2.0-flash shut down entirely in June 2026;
+# 2.5-flash was restricted from new users ahead of its October 2026 shutdown).
+# Updated to the current stable Flash generation as of August 2026.
+GEMINI_MODEL_PRIMARY = 'gemini-3.6-flash'
+GEMINI_MODEL_FALLBACK = 'gemini-3.5-flash'
 GEMINI_TIMEOUT_SECONDS = 15  # keep tight — this runs inline in the upload request
 
 
