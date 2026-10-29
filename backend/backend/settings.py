@@ -71,10 +71,9 @@ DATABASES = {
 }
 
 # ── MongoDB (candidates) ──────────────────────────────────────────────────
-MONGODB_URI = os.environ.get(
-    'MONGODB_URI',
-    'mongodb+srv://ammuhhharshi_db_user:WWwGcTrD39wL0MYd@cluster0.kr8penf.mongodb.net/neurohire?retryWrites=true&w=majority&appName=Cluster0'
-)
+# Never commit credentials here. Set MONGODB_URI as an environment variable
+# (Render dashboard in production, a local .env / shell export in development).
+MONGODB_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
 MONGODB_DB = os.environ.get('MONGODB_DB', 'neurohire')
 
 # ── Auth ──────────────────────────────────────────────────────────────────

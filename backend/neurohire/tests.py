@@ -307,3 +307,241 @@ class CandidateDeduplicationTests(TestCase):
         self.assertIn('python', update_data['skills'])
         self.assertIn('django', update_data['skills'])
         self.assertIn('react', update_data['skills'])
+
+# ════════════════════════════════════════════════════════════════════════════
+# Security hardening (Task 0) — access control, CSRF origin check,
+# no hardcoded credentials, uploaded résumés not retained on disk.
+# ════════════════════════════════════════════════════════════════════════════
+
+import os
+import re
+from pathlib import Path
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, override_settings
+
+from neurohire.models import UserProfile
+
+TRUSTED_ORIGIN = 'https://neurohire-bay.vercel.app'
+
+
+@override_settings(CORS_ALLOWED_ORIGINS=[TRUSTED_ORIGIN])
+class SecurityHardeningTests(TestCase):
+    """Behaviour expected after Task 0. Uses a CSRF-enforcing client, like a browser."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.client = Client(enforce_csrf_checks=True)
+
+        self.recruiter = User.objects.create_user('rec@company.com', 'rec@company.com', 'pw-12345678')
+        UserProfile.objects.create(user=self.recruiter, role='recruiter')
+
+        self.seeker = User.objects.create_user('seek@example.com', 'seek@example.com', 'pw-12345678')
+        UserProfile.objects.create(user=self.seeker, role='jobseeker')
+
+        self.admin = User.objects.create_user('admin@company.com', 'admin@company.com', 'pw-12345678',
+                                              is_staff=True)
+        UserProfile.objects.create(user=self.admin, role='recruiter')
+
+    def _decision_payload(self):
+        return {
+            'candidate_name': 'Test Candidate',
+            'ai_recommendation': 'hire',
+            'recruiter_decision': 'hire',
+            'role_match_score': 80,
+        }
+
+    # ── Candidate list (contains personal data) ─────────────────────────
+    @patch('neurohire.views.mongo_all_candidates', return_value=[{'name': 'A'}])
+    def test_candidate_list_requires_login(self, _mock):
+        self.assertEqual(self.client.get('/api/candidates/').status_code, 403)
+
+    @patch('neurohire.views.mongo_all_candidates', return_value=[{'name': 'A'}])
+    def test_candidate_list_forbidden_for_jobseeker(self, _mock):
+        self.client.force_login(self.seeker)
+        self.assertEqual(self.client.get('/api/candidates/').status_code, 403)
+
+    @patch('neurohire.views.mongo_all_candidates', return_value=[{'name': 'A'}])
+    def test_candidate_list_allowed_for_recruiter(self, _mock):
+        self.client.force_login(self.recruiter)
+        resp = self.client.get('/api/candidates/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), [{'name': 'A'}])
+
+    @patch('neurohire.views.mongo_get_candidate', return_value={'name': 'A'})
+    def test_candidate_detail_requires_recruiter(self, _mock):
+        self.assertEqual(self.client.get('/api/candidates/abc/').status_code, 403)
+        self.client.force_login(self.recruiter)
+        self.assertEqual(self.client.get('/api/candidates/abc/').status_code, 200)
+
+    # ── Destructive clear endpoint ──────────────────────────────────────
+    # NOTE: the router's candidates/<pk>/ route is registered first and captures
+    # "clear" as a pk, so DELETE /api/candidates/clear/ never reaches
+    # clear_candidates (it returns 405). The view is tested directly so it stays
+    # safe if the route is ever re-ordered.
+    @patch('neurohire.views.mongo_delete_all_candidates', return_value=5)
+    def test_clear_url_never_deletes_for_anonymous(self, mock_delete):
+        resp = self.client.delete('/api/candidates/clear/')
+        self.assertIn(resp.status_code, (403, 405))
+        mock_delete.assert_not_called()
+
+    def _call_clear_view(self, user, origin=TRUSTED_ORIGIN):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from neurohire.views import clear_candidates
+        request = APIRequestFactory().delete('/api/candidates/clear/', HTTP_ORIGIN=origin)
+        if user is not None:
+            force_authenticate(request, user=user)
+        return clear_candidates(request)
+
+    @patch('neurohire.views.mongo_delete_all_candidates', return_value=5)
+    def test_clear_view_blocked_for_anonymous(self, mock_delete):
+        self.assertEqual(self._call_clear_view(None).status_code, 403)
+        mock_delete.assert_not_called()
+
+    @patch('neurohire.views.mongo_delete_all_candidates', return_value=5)
+    def test_clear_view_blocked_for_non_staff_recruiter(self, mock_delete):
+        self.assertEqual(self._call_clear_view(self.recruiter).status_code, 403)
+        mock_delete.assert_not_called()
+
+    @patch('neurohire.views.mongo_delete_all_candidates', return_value=5)
+    def test_clear_view_allowed_for_staff(self, mock_delete):
+        resp = self._call_clear_view(self.admin)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data, {'deleted': 5})
+        mock_delete.assert_called_once()
+
+    # ── Decision log (drives the adaptive weights) ──────────────────────
+    @patch('neurohire.views.update_weights')
+    def test_decision_log_post_blocked_for_anonymous(self, mock_update):
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                content_type='application/json', HTTP_ORIGIN=TRUSTED_ORIGIN)
+        self.assertEqual(resp.status_code, 403)
+        mock_update.assert_not_called()
+
+    @patch('neurohire.views.update_weights')
+    def test_decision_log_post_blocked_for_jobseeker(self, mock_update):
+        self.client.force_login(self.seeker)
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                content_type='application/json', HTTP_ORIGIN=TRUSTED_ORIGIN)
+        self.assertEqual(resp.status_code, 403)
+        mock_update.assert_not_called()
+
+    def test_decision_log_list_requires_recruiter(self):
+        self.assertEqual(self.client.get('/api/ai-decision-logs/').status_code, 403)
+        self.client.force_login(self.recruiter)
+        self.assertEqual(self.client.get('/api/ai-decision-logs/').status_code, 200)
+
+    @patch('neurohire.views.update_weights')
+    def test_decision_log_post_allowed_for_recruiter_from_trusted_origin(self, mock_update):
+        """The real frontend sends no CSRF token (it can't read a cross-site cookie);
+        a trusted Origin must be enough, otherwise the dashboard breaks."""
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                content_type='application/json', HTTP_ORIGIN=TRUSTED_ORIGIN)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        mock_update.assert_called_once()
+
+    @patch('neurohire.views.update_weights')
+    def test_decision_log_post_rejected_from_untrusted_origin(self, mock_update):
+        """Cross-site request forgery: logged-in recruiter's browser, attacker's page."""
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                content_type='application/json', HTTP_ORIGIN='https://evil.example')
+        self.assertEqual(resp.status_code, 403)
+        mock_update.assert_not_called()
+
+    @patch('neurohire.views.update_weights')
+    def test_decision_log_post_rejected_with_null_origin(self, mock_update):
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                content_type='application/json', HTTP_ORIGIN='null')
+        self.assertEqual(resp.status_code, 403)
+        mock_update.assert_not_called()
+
+    @patch('neurohire.views.update_weights')
+    def test_decision_log_post_rejected_from_untrusted_referer_without_origin(self, mock_update):
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                content_type='application/json',
+                                HTTP_REFERER='https://evil.example/page')
+        self.assertEqual(resp.status_code, 403)
+        mock_update.assert_not_called()
+
+    @patch('neurohire.views.update_weights')
+    def test_decision_log_rejects_form_encoded_body(self, mock_update):
+        """Only JSON is accepted, so a plain HTML form (no CORS preflight) can't post."""
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                HTTP_ORIGIN=TRUSTED_ORIGIN)  # multipart form
+        self.assertEqual(resp.status_code, 415)
+        mock_update.assert_not_called()
+
+    @override_settings(CORS_ALLOWED_ORIGINS=[TRUSTED_ORIGIN],
+                       CORS_ORIGIN_WHITELIST=['http://localhost:5173'])
+    @patch('neurohire.views.update_weights')
+    def test_origin_trust_matches_what_cors_allows(self, mock_update):
+        """CORS ignores CORS_ORIGIN_WHITELIST when CORS_ALLOWED_ORIGINS is set,
+        so the CSRF origin check must ignore it too."""
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
+                                content_type='application/json', HTTP_ORIGIN='http://localhost:5173')
+        self.assertEqual(resp.status_code, 403)
+        mock_update.assert_not_called()
+
+    # ── No hardcoded credentials ────────────────────────────────────────
+    def test_settings_contain_no_credentialed_connection_string(self):
+        source = (Path(settings.BASE_DIR) / 'backend' / 'settings.py').read_text(encoding='utf-8')
+        self.assertIsNone(re.search(r'mongodb(\+srv)?://[^\s/\'"]+:[^\s@\'"]+@', source),
+                          'settings.py must not contain a MongoDB URI with a username:password')
+
+    # ── Uploaded résumés are not retained on disk ───────────────────────
+    def _upload_dir_files(self):
+        from neurohire.views import UPLOAD_DIR
+        return set(os.listdir(UPLOAD_DIR))
+
+    @patch('neurohire.views.mongo_insert_candidate', return_value='id1')
+    @patch('neurohire.views.analyze_resume', return_value={'name': 'A', 'skills': []})
+    def test_recruiter_upload_file_deleted_after_analysis(self, _an, _ins):
+        before = self._upload_dir_files()
+        f = SimpleUploadedFile('cv.pdf', b'%PDF-1.4 test', content_type='application/pdf')
+        resp = self.client.post('/api/upload-resume/', {'resume': f, 'target_role': 'Dev'})
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(self._upload_dir_files(), before)
+
+    @patch('neurohire.views.analyze_resume', side_effect=Exception('boom'))
+    def test_recruiter_upload_file_deleted_when_analysis_fails(self, _an):
+        before = self._upload_dir_files()
+        f = SimpleUploadedFile('cv.pdf', b'%PDF-1.4 test', content_type='application/pdf')
+        resp = self.client.post('/api/upload-resume/', {'resume': f, 'target_role': 'Dev'})
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(self._upload_dir_files(), before)
+
+    @patch('neurohire.views.analyze_resume', return_value={'name': 'A', 'skills': []})
+    def test_seeker_upload_file_deleted_after_analysis(self, _an):
+        before = self._upload_dir_files()
+        f = SimpleUploadedFile('cv.pdf', b'%PDF-1.4 test', content_type='application/pdf')
+        resp = self.client.post('/api/seeker-resume/', {'resume': f, 'target_role': 'Dev'})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self._upload_dir_files(), before)
+
+
+@override_settings(CORS_ALLOWED_ORIGINS=[TRUSTED_ORIGIN])
+class CorsPreflightTests(TestCase):
+    """The CSRF defence relies on browsers refusing to send a JSON/DELETE request
+    when the CORS preflight is not approved for the requesting origin."""
+
+    def _preflight(self, origin, method='POST'):
+        return Client().options('/api/ai-decision-logs/', HTTP_ORIGIN=origin,
+                                HTTP_ACCESS_CONTROL_REQUEST_METHOD=method,
+                                HTTP_ACCESS_CONTROL_REQUEST_HEADERS='content-type')
+
+    def test_preflight_denied_for_untrusted_origin(self):
+        resp = self._preflight('https://evil.example')
+        self.assertNotIn('access-control-allow-origin', {k.lower() for k in resp.headers})
+
+    def test_preflight_allowed_for_frontend_origin(self):
+        resp = self._preflight(TRUSTED_ORIGIN)
+        self.assertEqual(resp.headers.get('Access-Control-Allow-Origin'), TRUSTED_ORIGIN)
+        self.assertEqual(resp.headers.get('Access-Control-Allow-Credentials'), 'true')

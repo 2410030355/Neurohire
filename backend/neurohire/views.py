@@ -8,9 +8,9 @@ from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser, BasePermission
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 
 from .models import (
     Candidate,
@@ -29,6 +29,7 @@ from .serializers import (
     InterviewSerializer,
     MockInterviewSerializer,
 )
+from .authentication import OriginCheckedSessionAuthentication
 from .analysis_engine import analyze_resume, github_search_service, update_weights, get_current_weights
 from .mongo_client import (
     mongo_insert_candidate, mongo_get_candidate,
@@ -139,9 +140,10 @@ class CandidateViewSet(viewsets.ViewSet):
     """
     Candidates are stored in MongoDB.
     GET /api/candidates/  → list all from MongoDB
+    Recruiter-only: documents contain candidates' personal details.
     """
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def list(self, request):
         candidates = mongo_all_candidates(limit=200)
@@ -171,8 +173,11 @@ class WaitlistEntryViewSet(viewsets.ModelViewSet):
 class AIDecisionLogViewSet(viewsets.ModelViewSet):
     queryset = AIDecisionLog.objects.all().order_by("-id")
     serializer_class = AIDecisionLogSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    # Recruiter-only: every decision feeds the adaptive scoring weights.
+    # JSON-only so a cross-site HTML form cannot post without a CORS preflight.
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
     
     def create(self, request, *args, **kwargs):
         """
@@ -237,6 +242,17 @@ UPLOAD_DIR = os.path.join(settings.BASE_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+def _remove_upload(file_path):
+    """Delete a temporary résumé file. Résumés contain personal data and are
+    only needed while being analysed, so they are never kept on disk."""
+    try:
+        os.remove(file_path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.error(f"Could not delete uploaded file {os.path.basename(file_path)}: {e}")
+
+
 class ResumeUploadView(APIView):
     """
     Resume upload + AI analysis endpoint.
@@ -266,6 +282,7 @@ class ResumeUploadView(APIView):
                 for chunk in file.chunks():
                     f.write(chunk)
         except Exception as e:
+            _remove_upload(file_path)
             return Response(
                 {"error": f"File save failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -278,6 +295,8 @@ class ResumeUploadView(APIView):
                 {"error": f"Analysis failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+        finally:
+            _remove_upload(file_path)
 
         # ── Save unified candidate profile to MongoDB ──────────────────
         mongo_doc = {
@@ -459,6 +478,7 @@ class SeekerResumeView(APIView):
                 for chunk in file.chunks():
                     f.write(chunk)
         except Exception as e:
+            _remove_upload(file_path)
             return Response({'error': f'File save failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Run analysis
@@ -466,6 +486,8 @@ class SeekerResumeView(APIView):
             analysis = analyze_resume(file_path, target_role)
         except Exception as e:
             return Response({'error': f'Analysis failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        finally:
+            _remove_upload(file_path)
 
         # Build seeker-focused response
         skill_gaps = self._generate_skill_gaps(analysis, target_role)
@@ -2362,7 +2384,11 @@ class LogoutView(APIView):
 # ==============================
 
 @api_view(["DELETE"])
+@authentication_classes([OriginCheckedSessionAuthentication])
+@permission_classes([IsAdminUser])
+@parser_classes([JSONParser])
 def clear_candidates(request):
+    """Delete every candidate document. Staff (Django admin) accounts only."""
     deleted = mongo_delete_all_candidates()
+    logger.warning(f"All candidates cleared by {request.user.username} ({deleted} deleted)")
     return Response({'deleted': deleted})
-    return Response({"message": "All candidates cleared"})
