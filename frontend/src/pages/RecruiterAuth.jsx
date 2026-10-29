@@ -5,13 +5,18 @@ import { jsonFetch } from '@/api/http';
 import { createPageUrl } from '@/utils';
 import { useNavigate } from 'react-router-dom';
 
-const GOOGLE_OAUTH_URL = (import.meta.env.VITE_API_BASE_URL || 'https://neurohire-backend.onrender.com') + '/auth/login/google-oauth2/?next=/auth/complete/google-oauth2/?role=recruiter';
+const GOOGLE_OAUTH_URL = (import.meta.env.VITE_API_BASE_URL || 'https://neurohire-backend.onrender.com') + '/auth/login/google-oauth2/?role=recruiter';
 
 export default function RecruiterAuth() {
   const [tab, setTab]         = useState('login');   // 'login' | 'register'
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  // Google sign-in sends non-approved emails back here with ?error=not_approved
+  const [error, setError]       = useState(() =>
+    new URLSearchParams(window.location.search).get('error') === 'not_approved'
+      ? 'That Google account is not approved for recruiter access. Ask the admin to add your email.'
+      : ''
+  );
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -26,7 +31,7 @@ export default function RecruiterAuth() {
     try {
       const endpoint = tab === 'login' ? '/api/auth/login/' : '/api/auth/register/';
       const body = tab === 'login'
-        ? { email: form.email, password: form.password }
+        ? { email: form.email, password: form.password, role: 'recruiter' }
         : { email: form.email, password: form.password, full_name: form.full_name, role: 'recruiter' };
 
       const data = await jsonFetch(endpoint, { method: 'POST', body: JSON.stringify(body) });

@@ -30,6 +30,7 @@ from .serializers import (
     MockInterviewSerializer,
 )
 from .authentication import OriginCheckedSessionAuthentication
+from .access import is_allowed_recruiter_email, user_email, recruiter_signup_hint
 from .analysis_engine import analyze_resume, github_search_service, update_weights, get_current_weights
 from .mongo_client import (
     mongo_insert_candidate, mongo_get_candidate,
@@ -55,9 +56,14 @@ class IsRecruiter(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         try:
-            return request.user.profile.role == "recruiter"
+            is_recruiter = request.user.profile.role == "recruiter"
         except UserProfile.DoesNotExist:
             return False
+        # Re-checked on every request so removing an email/domain from the
+        # Render allowlist revokes access immediately. Staff always pass.
+        return is_recruiter and (
+            request.user.is_staff or is_allowed_recruiter_email(user_email(request.user))
+        )
 
 
 class IsJobSeeker(BasePermission):
@@ -120,16 +126,28 @@ def _user_payload(user):
 
 
 def _is_allowed_recruiter_email(email: str) -> bool:
-    """
-    Check if an email domain is in the allowed recruiter domains list.
-    Configured via ALLOWED_RECRUITER_DOMAINS in settings.py.
-    """
-    allowed_domains = getattr(settings, "ALLOWED_RECRUITER_DOMAINS", [])
-    if not allowed_domains:
-        # If no domains configured, block all recruiter registrations
-        return False
-    domain = email.split("@")[-1].lower().strip()
-    return domain in [d.lower().strip() for d in allowed_domains]
+    """Recruiter allowlist check (RECRUITER_ALLOWED_EMAILS / _DOMAINS). See access.py."""
+    return is_allowed_recruiter_email(email)
+
+
+def _validate_upload(file):
+    """Return an error message for an unacceptable résumé upload, else None."""
+    max_mb = getattr(settings, "MAX_UPLOAD_MB", 10)
+    allowed = getattr(settings, "ALLOWED_UPLOAD_EXTENSIONS", (".pdf", ".docx"))
+    ext = os.path.splitext(file.name or "")[1].lower()
+    if ext not in allowed:
+        return f"Unsupported file type '{ext or 'none'}'. Please upload a PDF or DOCX file."
+    if file.size > max_mb * 1024 * 1024:
+        return f"File is too large ({file.size / (1024 * 1024):.1f} MB). Maximum is {max_mb} MB."
+    if file.size == 0:
+        return "The uploaded file is empty."
+    return None
+
+
+def _safe_upload_path(original_name):
+    """Random on-disk name; never trust the client-supplied filename for paths."""
+    ext = os.path.splitext(original_name or "")[1].lower()
+    return os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}{ext}")
 
 
 # ==============================
@@ -156,18 +174,29 @@ class CandidateViewSet(viewsets.ViewSet):
         return Response(candidate)
 
 
+class IsRecruiterOrReadOnly(BasePermission):
+    """Anyone may read job postings; only recruiters may create/edit/delete them."""
+
+    def has_permission(self, request, view):
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return True
+        return IsRecruiter().has_permission(request, view)
+
+
 class JobPostingViewSet(viewsets.ModelViewSet):
     queryset = JobPosting.objects.all().order_by("-id")
     serializer_class = JobPostingSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiterOrReadOnly]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
 
 
 class WaitlistEntryViewSet(viewsets.ModelViewSet):
     queryset = WaitlistEntry.objects.all().order_by("-id")
     serializer_class = WaitlistEntrySerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiter]  # waitlist holds candidate details
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
 
 
 class AIDecisionLogViewSet(viewsets.ModelViewSet):
@@ -223,8 +252,11 @@ class AIDecisionLogViewSet(viewsets.ModelViewSet):
 class InterviewViewSet(viewsets.ModelViewSet):
     queryset = Interview.objects.all().order_by("-id")
     serializer_class = InterviewSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    # Seekers read their schedule, recruiters manage it: login required.
+    # (Per-user filtering of the list is a follow-up.)
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
 
 
 class MockInterviewViewSet(viewsets.ModelViewSet):
@@ -255,12 +287,12 @@ def _remove_upload(file_path):
 
 class ResumeUploadView(APIView):
     """
-    Resume upload + AI analysis endpoint.
-    Open to any authenticated user — recruiter check done via frontend routing.
+    Resume upload + AI analysis endpoint. Recruiter-only: every upload is
+    stored as a candidate profile and spends Gemini quota.
     """
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [AllowAny]  # CSRF exempt in urls.py handles security
-    authentication_classes = []
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def post(self, request):
         file = request.FILES.get("resume")
@@ -273,9 +305,11 @@ class ResumeUploadView(APIView):
                 {"error": "No file uploaded"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        upload_error = _validate_upload(file)
+        if upload_error:
+            return Response({"error": upload_error}, status=status.HTTP_400_BAD_REQUEST)
 
-        unique_name = f"{uuid.uuid4()}_{file.name}"
-        file_path = os.path.join(UPLOAD_DIR, unique_name)
+        file_path = _safe_upload_path(file.name)
 
         try:
             with open(file_path, "wb+") as f:
@@ -303,7 +337,7 @@ class ResumeUploadView(APIView):
             'name':                   analysis.get('name') or name,
             'email':                  analysis.get('email'),
             'phone':                  analysis.get('phone'),
-            'resume_url':             unique_name,
+            'resume_filename':        os.path.basename(file.name or ''),  # file itself is not kept
             'target_role':            target_role,
             'job_description':        job_description,
             'source':                 'resume_upload',
@@ -346,10 +380,11 @@ class SeekerResumeView(APIView):
     """
     Resume analysis endpoint for job seekers.
     Returns personal improvement feedback instead of recruiter-style scoring.
+    Login required (any role) so anonymous traffic can't drain the Gemini quota.
     """
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     # Common skill sets by role category for gap analysis
     ROLE_SKILL_MAP = {
@@ -469,10 +504,12 @@ class SeekerResumeView(APIView):
 
         if not file:
             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
+        upload_error = _validate_upload(file)
+        if upload_error:
+            return Response({'error': upload_error}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save file
-        unique_name = f"{uuid.uuid4()}_{file.name}"
-        file_path = os.path.join(UPLOAD_DIR, unique_name)
+        # Save file (temporary — deleted right after analysis)
+        file_path = _safe_upload_path(file.name)
         try:
             with open(file_path, 'wb+') as f:
                 for chunk in file.chunks():
@@ -542,6 +579,7 @@ class GitHubSearchView(APIView):
     """
     parser_classes = [JSONParser]
     permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def get(self, request):
         query = request.GET.get('q') or request.GET.get('query', '')
@@ -1130,10 +1168,11 @@ class TalentSearchView(APIView):
     Search for talent across GitHub or job portals.
     - search_type = 'github'  → real GitHub API search
     - search_type = 'portal'  → simulated portal candidates
+    Recruiter-only (spends the GitHub API quota).
     """
     parser_classes = [JSONParser]
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def post(self, request):
         data = request.data or {}
@@ -1725,15 +1764,8 @@ class RegisterView(APIView):
 
         # ── Recruiter domain check ──────────────────────────────────
         if role == "recruiter" and not _is_allowed_recruiter_email(email):
-            allowed_domains = getattr(settings, "ALLOWED_RECRUITER_DOMAINS", [])
-            domain_hint = ", ".join(allowed_domains) if allowed_domains else "no domains configured"
             return Response(
-                {
-                    "error": (
-                        "Recruiter accounts require an official company email address. "
-                        f"Allowed domains: {domain_hint}"
-                    )
-                },
+                {"error": "This email is not approved for recruiter access. " + recruiter_signup_hint()},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1797,8 +1829,20 @@ class LoginView(APIView):
             )
 
         # Ensure profile exists for legacy users (created before this update)
-        if not UserProfile.objects.filter(user=user).exists():
-            UserProfile.objects.get_or_create(user=user, defaults={"role": "jobseeker"})
+        profile, _ = UserProfile.objects.get_or_create(user=user, defaults={"role": "jobseeker"})
+
+        # Recruiter login page sends role="recruiter". Only allowlisted emails
+        # may hold that role; an approved jobseeker account is upgraded.
+        requested_role = (data.get("role") or "").strip().lower()
+        if requested_role == "recruiter":
+            if not (user.is_staff or _is_allowed_recruiter_email(user_email(user))):
+                return Response(
+                    {"error": "This account is not approved for recruiter access. " + recruiter_signup_hint()},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if profile.role != "recruiter":
+                profile.role = "recruiter"
+                profile.save(update_fields=["role"])
 
         # ✅ Explicitly set backend to avoid _get_backend_from_user crash with social_django
         if not hasattr(user, 'backend'):

@@ -313,6 +313,7 @@ class CandidateDeduplicationTests(TestCase):
 # no hardcoded credentials, uploaded résumés not retained on disk.
 # ════════════════════════════════════════════════════════════════════════════
 
+import json
 import os
 import re
 from pathlib import Path
@@ -504,6 +505,7 @@ class SecurityHardeningTests(TestCase):
     @patch('neurohire.views.mongo_insert_candidate', return_value='id1')
     @patch('neurohire.views.analyze_resume', return_value={'name': 'A', 'skills': []})
     def test_recruiter_upload_file_deleted_after_analysis(self, _an, _ins):
+        self.client.force_login(self.recruiter)
         before = self._upload_dir_files()
         f = SimpleUploadedFile('cv.pdf', b'%PDF-1.4 test', content_type='application/pdf')
         resp = self.client.post('/api/upload-resume/', {'resume': f, 'target_role': 'Dev'})
@@ -512,6 +514,7 @@ class SecurityHardeningTests(TestCase):
 
     @patch('neurohire.views.analyze_resume', side_effect=Exception('boom'))
     def test_recruiter_upload_file_deleted_when_analysis_fails(self, _an):
+        self.client.force_login(self.recruiter)
         before = self._upload_dir_files()
         f = SimpleUploadedFile('cv.pdf', b'%PDF-1.4 test', content_type='application/pdf')
         resp = self.client.post('/api/upload-resume/', {'resume': f, 'target_role': 'Dev'})
@@ -520,6 +523,7 @@ class SecurityHardeningTests(TestCase):
 
     @patch('neurohire.views.analyze_resume', return_value={'name': 'A', 'skills': []})
     def test_seeker_upload_file_deleted_after_analysis(self, _an):
+        self.client.force_login(self.seeker)
         before = self._upload_dir_files()
         f = SimpleUploadedFile('cv.pdf', b'%PDF-1.4 test', content_type='application/pdf')
         resp = self.client.post('/api/seeker-resume/', {'resume': f, 'target_role': 'Dev'})
@@ -545,3 +549,223 @@ class CorsPreflightTests(TestCase):
         resp = self._preflight(TRUSTED_ORIGIN)
         self.assertEqual(resp.headers.get('Access-Control-Allow-Origin'), TRUSTED_ORIGIN)
         self.assertEqual(resp.headers.get('Access-Control-Allow-Credentials'), 'true')
+
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Task 0 (part 2): recruiter allowlist, Google sign-in role, upload limits,
+# quota-spending endpoints
+# ════════════════════════════════════════════════════════════════════════════
+
+@override_settings(ALLOWED_RECRUITER_EMAILS=['approved@gmail.com'],
+                   ALLOWED_RECRUITER_DOMAINS=['company.com'],
+                   CORS_ALLOWED_ORIGINS=[TRUSTED_ORIGIN])
+class RecruiterAllowlistTests(TestCase):
+
+    def setUp(self):
+        self.client = Client(enforce_csrf_checks=True)
+        self.User = get_user_model()
+
+    def _register(self, email, role='recruiter'):
+        return self.client.post('/api/auth/register/', data=json.dumps({
+            'email': email, 'password': 'pw-12345678', 'full_name': 'X Y', 'role': role,
+        }), content_type='application/json')
+
+    def _login(self, email, role=None):
+        body = {'email': email, 'password': 'pw-12345678'}
+        if role:
+            body['role'] = role
+        return self.client.post('/api/auth/login/', data=json.dumps(body), content_type='application/json')
+
+    def test_helper_matches_email_and_domain_case_insensitively(self):
+        from neurohire.access import is_allowed_recruiter_email
+        self.assertTrue(is_allowed_recruiter_email('Approved@Gmail.com'))
+        self.assertTrue(is_allowed_recruiter_email('anyone@COMPANY.com'))
+        self.assertFalse(is_allowed_recruiter_email('other@gmail.com'))
+        self.assertFalse(is_allowed_recruiter_email('x@notcompany.com'))
+        self.assertFalse(is_allowed_recruiter_email(''))
+        self.assertFalse(is_allowed_recruiter_email(None))
+
+    def test_register_recruiter_with_allowlisted_gmail(self):
+        self.assertEqual(self._register('approved@gmail.com').status_code, 201)
+        self.assertEqual(self.User.objects.get(username='approved@gmail.com').profile.role, 'recruiter')
+
+    def test_register_recruiter_with_unapproved_gmail_is_refused(self):
+        resp = self._register('random@gmail.com')
+        self.assertEqual(resp.status_code, 403)
+        self.assertNotIn('approved@gmail.com', resp.content.decode())  # allowlist not leaked
+        self.assertFalse(self.User.objects.filter(username='random@gmail.com').exists())
+
+    def test_jobseeker_signup_unaffected(self):
+        self.assertEqual(self._register('random@gmail.com', role='jobseeker').status_code, 201)
+
+    def test_recruiter_login_upgrades_approved_seeker_account(self):
+        u = self.User.objects.create_user('approved@gmail.com', 'approved@gmail.com', 'pw-12345678')
+        UserProfile.objects.create(user=u, role='jobseeker')
+        resp = self._login('approved@gmail.com', role='recruiter')
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()['role'], 'recruiter')
+
+    def test_recruiter_login_refused_for_unapproved_account(self):
+        u = self.User.objects.create_user('random@gmail.com', 'random@gmail.com', 'pw-12345678')
+        UserProfile.objects.create(user=u, role='jobseeker')
+        self.assertEqual(self._login('random@gmail.com', role='recruiter').status_code, 403)
+        u.profile.refresh_from_db()
+        self.assertEqual(u.profile.role, 'jobseeker')
+
+    def test_plain_login_does_not_change_role(self):
+        u = self.User.objects.create_user('approved@gmail.com', 'approved@gmail.com', 'pw-12345678')
+        UserProfile.objects.create(user=u, role='recruiter')
+        resp = self._login('approved@gmail.com')
+        self.assertEqual(resp.json()['role'], 'recruiter')
+
+    @patch('neurohire.views.mongo_all_candidates', return_value=[])
+    def test_removing_email_from_allowlist_revokes_access(self, _m):
+        u = self.User.objects.create_user('approved@gmail.com', 'approved@gmail.com', 'pw-12345678')
+        UserProfile.objects.create(user=u, role='recruiter')
+        self.client.force_login(u)
+        self.assertEqual(self.client.get('/api/candidates/').status_code, 200)
+        with override_settings(ALLOWED_RECRUITER_EMAILS=[]):
+            self.assertEqual(self.client.get('/api/candidates/').status_code, 403)
+
+
+@override_settings(ALLOWED_RECRUITER_EMAILS=['approved@gmail.com'], ALLOWED_RECRUITER_DOMAINS=[])
+class GoogleSignInRoleTests(TestCase):
+    """neurohire.pipeline.save_user_profile with a fake social-auth backend."""
+
+    def _run(self, email, session_role, existing_role=None):
+        from neurohire.pipeline import save_user_profile, set_redirect_url
+        from django.contrib.sessions.backends.db import SessionStore
+        u = get_user_model().objects.create_user(email, email, 'pw-12345678')
+        if existing_role:
+            UserProfile.objects.create(user=u, role=existing_role)
+        session = SessionStore()
+        if session_role:
+            session['role'] = session_role
+        backend = MagicMock()
+        backend.strategy.session_get.side_effect = lambda k, d=None: session.get(k, d)
+        backend.strategy.session_set.side_effect = lambda k, v: session.__setitem__(k, v)
+        request = MagicMock()
+        request.GET = {}
+        request.session = session
+        save_user_profile(backend, u, {'name': 'Some One', 'email': email}, request)
+        set_redirect_url(backend, u, {}, request)
+        u.profile.refresh_from_db()
+        return u.profile.role, session.get('next', '')
+
+    def test_approved_gmail_becomes_recruiter(self):
+        role, nxt = self._run('approved@gmail.com', 'recruiter')
+        self.assertEqual(role, 'recruiter')
+        self.assertTrue(nxt.endswith('/RecruiterDashboard'))
+
+    def test_unapproved_gmail_gets_seeker_and_error_redirect(self):
+        role, nxt = self._run('random@gmail.com', 'recruiter')
+        self.assertEqual(role, 'jobseeker')
+        self.assertIn('/RecruiterAuth?error=not_approved', nxt)
+
+    def test_missing_role_no_longer_demotes_existing_recruiter(self):
+        role, _ = self._run('approved@gmail.com', None, existing_role='recruiter')
+        self.assertEqual(role, 'recruiter')
+
+    def test_seeker_button_creates_seeker(self):
+        role, nxt = self._run('random@gmail.com', 'jobseeker')
+        self.assertEqual(role, 'jobseeker')
+        self.assertTrue(nxt.endswith('/SeekerDashboard'))
+
+    def test_role_param_is_kept_through_oauth_session(self):
+        from django.conf import settings
+        self.assertIn('role', settings.SOCIAL_AUTH_FIELDS_STORED_IN_SESSION)
+
+
+@override_settings(CORS_ALLOWED_ORIGINS=[TRUSTED_ORIGIN], MAX_UPLOAD_MB=1)
+class UploadAndQuotaEndpointTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+        self.client = Client(enforce_csrf_checks=True)
+        self.recruiter = User.objects.create_user('rec@company.com', 'rec@company.com', 'pw-12345678')
+        UserProfile.objects.create(user=self.recruiter, role='recruiter')
+        self.seeker = User.objects.create_user('seek@example.com', 'seek@example.com', 'pw-12345678')
+        UserProfile.objects.create(user=self.seeker, role='jobseeker')
+
+    def _upload(self, url, name, content):
+        return self.client.post(url, {'resume': SimpleUploadedFile(name, content), 'target_role': 'Dev'},
+                                HTTP_ORIGIN=TRUSTED_ORIGIN)
+
+    @patch('neurohire.views.analyze_resume')
+    def test_recruiter_upload_requires_recruiter(self, an):
+        self.assertEqual(self._upload('/api/upload-resume/', 'cv.pdf', b'%PDF').status_code, 403)
+        self.client.force_login(self.seeker)
+        self.assertEqual(self._upload('/api/upload-resume/', 'cv.pdf', b'%PDF').status_code, 403)
+        an.assert_not_called()
+
+    @patch('neurohire.views.analyze_resume')
+    def test_seeker_upload_requires_login(self, an):
+        self.assertEqual(self._upload('/api/seeker-resume/', 'cv.pdf', b'%PDF').status_code, 403)
+        an.assert_not_called()
+
+    @patch('neurohire.views.analyze_resume')
+    def test_upload_from_untrusted_origin_rejected(self, an):
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/upload-resume/', {'resume': SimpleUploadedFile('cv.pdf', b'%PDF')},
+                                HTTP_ORIGIN='https://evil.example')
+        self.assertEqual(resp.status_code, 403)
+        an.assert_not_called()
+
+    @patch('neurohire.views.analyze_resume')
+    def test_wrong_extension_rejected(self, an):
+        self.client.force_login(self.recruiter)
+        for name in ('cv.exe', 'cv.doc', 'cv', 'cv.pdf.html'):
+            resp = self._upload('/api/upload-resume/', name, b'data')
+            self.assertEqual(resp.status_code, 400, name)
+        an.assert_not_called()
+
+    @patch('neurohire.views.analyze_resume')
+    def test_oversized_and_empty_files_rejected(self, an):
+        self.client.force_login(self.seeker)
+        self.assertEqual(self._upload('/api/seeker-resume/', 'cv.pdf', b'x' * (1024 * 1024 + 1)).status_code, 400)
+        self.assertEqual(self._upload('/api/seeker-resume/', 'cv.docx', b'').status_code, 400)
+        an.assert_not_called()
+
+    @patch('neurohire.views.mongo_insert_candidate', return_value='id1')
+    @patch('neurohire.views.analyze_resume', return_value={'name': 'A', 'skills': []})
+    def test_client_filename_never_used_as_path(self, an, ins):
+        self.client.force_login(self.recruiter)
+        resp = self._upload('/api/upload-resume/', '../../etc/evil.pdf', b'%PDF')
+        self.assertEqual(resp.status_code, 201, resp.content)
+        from neurohire.views import UPLOAD_DIR
+        used_path = an.call_args[0][0]
+        self.assertEqual(os.path.dirname(used_path), UPLOAD_DIR)
+        self.assertNotIn('evil', used_path)
+        self.assertNotIn('resume_url', ins.call_args[0][0])
+
+    @patch('neurohire.views.github_search_service')
+    def test_talent_search_is_recruiter_only(self, gh):
+        body = json.dumps({'search_type': 'portal', 'role': 'frontend developer'})
+        resp = self.client.post('/api/talent-search/', body, content_type='application/json',
+                                HTTP_ORIGIN=TRUSTED_ORIGIN)
+        self.assertEqual(resp.status_code, 403)
+        self.client.force_login(self.recruiter)
+        resp = self.client.post('/api/talent-search/', body, content_type='application/json',
+                                HTTP_ORIGIN=TRUSTED_ORIGIN)
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_waitlist_recruiter_only_and_interviews_need_login(self):
+        self.assertEqual(self.client.get('/api/waitlist/').status_code, 403)
+        self.assertEqual(self.client.get('/api/interviews/').status_code, 403)
+        self.client.force_login(self.seeker)
+        self.assertEqual(self.client.get('/api/waitlist/').status_code, 403)
+        self.assertEqual(self.client.get('/api/interviews/').status_code, 200)
+        self.client.force_login(self.recruiter)
+        self.assertEqual(self.client.get('/api/waitlist/').status_code, 200)
+
+    def test_jobs_public_read_recruiter_write(self):
+        self.assertEqual(self.client.get('/api/jobs/').status_code, 200)
+        resp = self.client.post('/api/jobs/', '{}', content_type='application/json', HTTP_ORIGIN=TRUSTED_ORIGIN)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_rate_limiting_is_configured(self):
+        from django.conf import settings
+        rf = settings.REST_FRAMEWORK
+        self.assertIn('rest_framework.throttling.AnonRateThrottle', rf['DEFAULT_THROTTLE_CLASSES'])
+        self.assertIn('anon', rf['DEFAULT_THROTTLE_RATES'])

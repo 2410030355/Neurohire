@@ -7,6 +7,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-local-dev-only-change-in-prod')
 DEBUG      = os.environ.get('DEBUG', 'False') == 'True'
 
+if not DEBUG and SECRET_KEY.startswith('django-insecure'):
+    # Sessions are signed with this key; a public default would let anyone
+    # forge a recruiter/admin login. Warn loudly rather than crash the deploy.
+    import warnings
+    warnings.warn('SECRET_KEY env var is not set — set it on Render before going live.')
+
 ALLOWED_HOSTS = os.environ.get(
     'ALLOWED_HOSTS',
     'localhost,127.0.0.1,0.0.0.0'
@@ -166,11 +172,23 @@ CORS_ALLOW_HEADERS = [
 ]
 CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
 
-# ── Recruiter domain whitelist ────────────────────────────────────────────
-ALLOWED_RECRUITER_DOMAINS = [
-    'company.com', 'corp.com', 'enterprise.com',
-    'hr.com', 'recruit.com', 'hiring.com',
-]
+# ── Recruiter allowlist ───────────────────────────────────────────────────
+# Who may hold the recruiter role. Applied to email/password signup AND Google
+# sign-in, and re-checked on every recruiter-only request (so removing someone
+# here revokes their access). Set both as comma-separated env vars on Render:
+#   RECRUITER_ALLOWED_EMAILS  = you@gmail.com,mentor@gmail.com
+#   RECRUITER_ALLOWED_DOMAINS = company.com,hr.com
+def _csv_env(name, default=''):
+    return [v.strip().lower() for v in os.environ.get(name, default).split(',') if v.strip()]
+
+ALLOWED_RECRUITER_EMAILS = _csv_env('RECRUITER_ALLOWED_EMAILS')
+ALLOWED_RECRUITER_DOMAINS = _csv_env(
+    'RECRUITER_ALLOWED_DOMAINS',
+    'company.com,corp.com,enterprise.com,hr.com,recruit.com,hiring.com',
+)
+
+# Google sign-in: keep the ?role= query param through the OAuth round-trip
+SOCIAL_AUTH_FIELDS_STORED_IN_SESSION = ['role']
 
 # ── REST Framework ────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
@@ -180,4 +198,17 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
+    # Rate limiting: protects the Gemini/GitHub quotas and the free-tier server.
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.environ.get('THROTTLE_ANON', '30/min'),
+        'user': os.environ.get('THROTTLE_USER', '120/min'),
+    },
 }
+
+# ── Upload limits ─────────────────────────────────────────────────────────
+MAX_UPLOAD_MB = int(os.environ.get('MAX_UPLOAD_MB', '10'))
+ALLOWED_UPLOAD_EXTENSIONS = ('.pdf', '.docx')

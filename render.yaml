@@ -21,3 +21,10 @@ services:
         scope: runtime
       - key: GOOGLE_CLIENT_SECRET
         scope: runtime
+      - key: GEMINI_API_KEY
+        scope: runtime
+      # Recruiter allowlist (comma-separated). Set real values in the Render dashboard.
+      - key: RECRUITER_ALLOWED_EMAILS
+        scope: runtime
+      - key: RECRUITER_ALLOWED_DOMAINS
+        scope: runtime
