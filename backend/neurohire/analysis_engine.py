@@ -23,131 +23,21 @@ logger = logging.getLogger(__name__)
 
 
 # ==============================
-# Gemini Structured Extraction
+# Information extraction (paper §IV.B) — see extraction.py
 # ==============================
-
-# Lazy, thread-safe client init (mirrors the semantic model pattern above)
-gemini_client = None
-gemini_client_lock = threading.Lock()
-
-# gemini-2.5-flash and gemini-2.0-flash were both deprecated by Google after
-# this code was originally written (2.0-flash shut down entirely in June 2026;
-# 2.5-flash was restricted from new users ahead of its October 2026 shutdown).
-# Updated to the current stable Flash generation as of August 2026.
-GEMINI_MODEL_PRIMARY = 'gemini-3.6-flash'
-GEMINI_MODEL_FALLBACK = 'gemini-3.5-flash'
-GEMINI_TIMEOUT_SECONDS = 15  # keep tight — this runs inline in the upload request
-
-
-def _get_gemini_client():
-    """
-    Load the Gemini client lazily on first use.
-    Returns None (never raises) if the SDK is missing or no API key is configured —
-    callers must treat None as "fall back to regex extraction".
-    """
-    global gemini_client
-    if gemini_client is not None:
-        return gemini_client
-
-    with gemini_client_lock:
-        if gemini_client is not None:
-            return gemini_client
-
-        try:
-            from django.conf import settings
-            api_key = getattr(settings, 'GEMINI_API_KEY', None) or os.environ.get('GEMINI_API_KEY')
-        except Exception:
-            api_key = os.environ.get('GEMINI_API_KEY')
-
-        if not api_key:
-            logger.warning("GEMINI_API_KEY not configured — Gemini extraction disabled, using regex fallback.")
-            gemini_client = None
-            return None
-
-        try:
-            from google.genai import Client
-            gemini_client = Client(api_key=api_key)
-            return gemini_client
-        except Exception as e:
-            logger.error(f"Failed to initialise Gemini client: {e}")
-            gemini_client = None
-            return None
-
-
-GEMINI_EXTRACTION_PROMPT = (
-    "Extract candidate information from this resume text into valid JSON with keys: "
-    "name, email, skills (list), experience_years (int), education (list). "
-    "Return ONLY the JSON object, no markdown fences, no commentary.\n\n"
-    "Resume text:\n{text}"
+from .extraction import (
+    SKILL_KEYWORDS,
+    GEMINI_EMBEDDING_MODEL,
+    extract_skills,
+    extract_experience,
+    extract_education,
+    experience_from_positions,
+    extract_with_gemini,
+    find_skill_spans,
+    merge_skills,
+    redact_for_embedding,
+    get_gemini_client as _get_gemini_client,
 )
-
-
-def _clean_json_response(raw_text: str) -> str:
-    """Strip markdown code fences if the model wraps its JSON despite instructions."""
-    cleaned = raw_text.strip()
-    if cleaned.startswith('```'):
-        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
-        cleaned = re.sub(r'\s*```$', '', cleaned)
-    return cleaned.strip()
-
-
-def extract_with_gemini(text_original: str) -> Optional[Dict]:
-    """
-    Structured resume-field extraction via the Gemini API.
-
-    Returns a dict with keys: name, email, skills, experience_years, education
-    on success, or None on any failure (missing key, SDK error, timeout,
-    malformed JSON) — callers must fall back to the regex extractor.
-    Never raises.
-    """
-    client = _get_gemini_client()
-    if client is None:
-        return None
-
-    if not text_original or not text_original.strip():
-        return None
-
-    # Cap input length — long resumes don't need more than ~6000 chars of
-    # context for field extraction, and it keeps latency/cost predictable.
-    trimmed_text = text_original.strip()[:6000]
-    prompt = GEMINI_EXTRACTION_PROMPT.format(text=trimmed_text)
-
-    for model_name in (GEMINI_MODEL_PRIMARY, GEMINI_MODEL_FALLBACK):
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
-
-            raw_text = getattr(response, 'text', None)
-            if not raw_text:
-                logger.warning(f"Gemini ({model_name}) returned an empty response.")
-                continue
-
-            parsed = json.loads(_clean_json_response(raw_text))
-
-            # Normalise / validate shape so downstream code can rely on it
-            result = {
-                'name': parsed.get('name') or None,
-                'email': parsed.get('email') or None,
-                'skills': parsed.get('skills') if isinstance(parsed.get('skills'), list) else [],
-                'experience_years': float(parsed.get('experience_years') or 0),
-                'education': parsed.get('education') if isinstance(parsed.get('education'), list) else (
-                    [parsed.get('education')] if parsed.get('education') else []
-                ),
-            }
-            logger.info(f"Gemini extraction succeeded using {model_name}.")
-            return result
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Gemini ({model_name}) returned invalid JSON: {e}")
-            continue
-        except Exception as e:
-            logger.error(f"Gemini extraction failed on {model_name}: {e}")
-            continue
-
-    # Both models failed
-    return None
 
 
 # ==============================
@@ -264,40 +154,6 @@ def update_weights(recruiter_decision: str, match_score: float = None):
 # Load weights on module initialization
 _load_weights_from_disk()
 
-# Skill Database (Expanded)
-
-SKILL_KEYWORDS = [
-    # Programming Languages
-    "python", "java", "javascript", "typescript", "c++", "c#", "php", "ruby",
-    "go", "golang", "rust", "swift", "kotlin", "scala", "r", "matlab",
-
-    # Web Technologies
-    "react", "angular", "vue", "vue.js", "node.js", "express", "django",
-    "flask", "fastapi", "spring", "spring boot", "asp.net", "laravel",
-    "html", "css", "sass", "less", "bootstrap", "tailwind", "jquery",
-
-    # Databases
-    "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch",
-    "cassandra", "dynamodb", "oracle", "sql server", "sqlite", "mariadb",
-
-    # Cloud & DevOps
-    "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s",
-    "jenkins", "gitlab", "github actions", "terraform", "ansible", "ci/cd",
-
-    # Data Science & ML
-    "machine learning", "deep learning", "neural networks", "tensorflow",
-    "pytorch", "keras", "scikit-learn", "pandas", "numpy", "data analysis",
-    "data science", "nlp", "computer vision", "ai", "artificial intelligence",
-
-    # Mobile Development
-    "android", "ios", "react native", "flutter", "xamarin", "mobile development",
-
-    # Other Technologies
-    "git", "linux", "bash", "powershell", "rest api", "graphql", "microservices",
-    "agile", "scrum", "jira", "testing", "unit testing", "selenium", "pytest",
-    "api", "backend", "frontend", "full stack", "devops", "blockchain", "solidity"
-]
-
 LEARNING_WORDS = [
     "learned", "built", "developed", "improved", "optimized",
     "created", "designed", "implemented", "architected", "led",
@@ -310,7 +166,6 @@ LEARNING_WORDS = [
 # Sentence Transformer Utilities
 # ==============================
 
-GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001'
 
 
 def _get_gemini_embedding(text: str) -> Optional[np.ndarray]:
@@ -402,26 +257,6 @@ def get_similarity_score(resume_text: str, job_description_text: str) -> float:
 EMAIL_PATTERN = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
 PHONE_PATTERN = re.compile(r'[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,4}[-\s\.]?[0-9]{1,9}')
 
-# Education keywords with levels
-EDUCATION_KEYWORDS = {
-    "phd": "PhD",
-    "doctorate": "PhD",
-    "ph.d": "PhD",
-    "master": "Master's Degree",
-    "m.tech": "Master's Degree",
-    "m.s": "Master's Degree",
-    "msc": "Master's Degree",
-    "mba": "MBA",
-    "bachelor": "Bachelor's Degree",
-    "b.tech": "Bachelor's Degree",
-    "b.e": "Bachelor's Degree",
-    "b.s": "Bachelor's Degree",
-    "bsc": "Bachelor's Degree",
-    "associate": "Associate Degree",
-    "diploma": "Diploma"
-}
-
-
 # ==============================
 # Text Extraction
 # ==============================
@@ -484,19 +319,6 @@ def extract_text_from_pdf(file_path: str) -> Tuple[str, str]:
 # Core Extractors
 # ==============================
 
-def extract_skills(text: str) -> List[str]:
-    """Extract skills from resume text with deduplication."""
-    found_skills = set()
-    text_lower = text.lower()
-
-    for skill in SKILL_KEYWORDS:
-        # Use word boundaries for better matching
-        if re.search(r'\b' + re.escape(skill) + r'\b', text_lower):
-            found_skills.add(skill)
-
-    return sorted(list(found_skills))
-
-
 def extract_email(text: str) -> Optional[str]:
     """Extract email address from resume."""
     emails = EMAIL_PATTERN.findall(text)
@@ -546,55 +368,6 @@ def extract_name(text: str) -> Optional[str]:
                 return clean.title()
 
     return None
-
-
-def extract_experience(text: str) -> float:
-    """
-    Extract years of experience from resume.
-    Looks for various patterns like "5 years", "5+ years", etc.
-    """
-    # Pattern for explicit years mention
-    patterns = [
-        r'(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?experience',
-        r'experience\s*:\s*(\d+)\+?\s*(?:years?|yrs?)',
-        r'(\d+)\+?\s*(?:years?|yrs?)',
-    ]
-
-    max_years = 0
-    for pattern in patterns:
-        matches = re.findall(pattern, text.lower())
-        if matches:
-            max_years = max(max_years, max(int(m) for m in matches))
-
-    return float(max_years) if max_years > 0 else 0.0
-
-
-def extract_education(text: str) -> Optional[str]:
-    """
-    Extract highest education level from resume.
-    Returns the highest degree found with confidence.
-    """
-    text_lower = text.lower()
-    highest_level = None
-    priority = 0  # Higher priority = higher education level
-
-    education_priority = {
-        "PhD": 4,
-        "Master's Degree": 3,
-        "MBA": 3,
-        "Bachelor's Degree": 2,
-        "Associate Degree": 1,
-        "Diploma": 1
-    }
-
-    for keyword, degree in EDUCATION_KEYWORDS.items():
-        if keyword in text_lower:
-            current_priority = education_priority.get(degree, 0)
-            if current_priority > priority:
-                priority = current_priority
-                highest_level = degree
-
-    return highest_level
 
 
 # ==============================
@@ -698,23 +471,18 @@ def validate_skills_from_text(skills: List[str], text_lower: str) -> List[dict]:
     ]
     validated = []
     for skill in skills:
-        sl = skill.lower()
-        idx = text_lower.find(sl)
-        if idx == -1:
+        spans = find_skill_spans(text_lower, skill)
+        if not spans:
             validated.append({'skill': skill, 'status': 'Unverified'})
             continue
-        window_start = max(0, idx - 60)
-        window_end = min(len(text_lower), idx + len(sl) + 60)
-        window = text_lower[window_start:window_end]
-        has_action = any(verb in window for verb in ACTION_VERBS)
-        if has_action:
+        start, end = spans[0]
+        window = text_lower[max(0, start - 60):min(len(text_lower), end + 60)].lower()
+        if any(verb in window for verb in ACTION_VERBS):
             validated.append({'skill': skill, 'status': 'Valid'})
+        elif len(spans) >= 2:
+            validated.append({'skill': skill, 'status': 'Partial'})
         else:
-            count = text_lower.count(sl)
-            if count >= 2:
-                validated.append({'skill': skill, 'status': 'Partial'})
-            else:
-                validated.append({'skill': skill, 'status': 'Unverified'})
+            validated.append({'skill': skill, 'status': 'Unverified'})
     return validated
 
 
@@ -838,39 +606,57 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
         # regardless of extraction path, for scoring and phone lookup.
         text_lower, text_original = extract_text_from_pdf(file_path)
 
-        # ── Try Gemini structured extraction first ──────────────────────
+        # ── Structured extraction (paper §IV.B) ─────────────────────────
+        # Deterministic regex/date parsing is the primary source for skills and
+        # experience (reproducible scores). Gemini, when configured, adds
+        # employment/projects structure and fills gaps; its skills are only
+        # kept if they are actually written in the résumé.
         gemini_result = extract_with_gemini(text_original)
+        extraction_method = 'gemini+regex' if gemini_result else 'regex'
+        g = gemini_result or {}
 
-        if gemini_result:
-            name = gemini_result['name']
-            email = gemini_result['email']
-            skills = [s.lower() for s in gemini_result['skills']] or extract_skills(text_lower)
-            experience_years = gemini_result['experience_years'] or extract_experience(text_lower)
-            education_list = gemini_result['education']
-            education = education_list[0] if education_list else extract_education(text_lower)
-            extraction_method = 'gemini'
-        else:
-            name = extract_name(text_original)
-            email = extract_email(text_original)
-            skills = extract_skills(text_lower)
-            experience_years = extract_experience(text_lower)
-            education = extract_education(text_lower)
-            extraction_method = 'regex'
-
-        # Phone isn't part of the Gemini schema — always regex
+        name = g.get('name') or extract_name(text_original)
+        email = g.get('email') or extract_email(text_original)
         phone = extract_phone(text_original)
+
+        skills, other_skills = merge_skills(
+            text_original, extract_skills(text_original), g.get('skills', []))
+
+        experience = extract_experience(text_original)
+        employment_history = experience['positions']
+        experience_source = experience['source']
+        if experience['dated_years'] is None and g.get('employment'):
+            gemini_years = experience_from_positions(g['employment'])
+            if gemini_years:
+                experience['dated_years'] = gemini_years
+                experience_source = 'dated (gemini)'
+            employment_history = g['employment']
+        claimed_years = experience['claimed_years'] or g.get('claimed_experience_years')
+        experience_years = experience['dated_years'] or claimed_years or 0.0
+        if not experience['dated_years']:
+            experience_source = 'claimed' if claimed_years else 'none'
+
+        education = extract_education(text_original)
+        if not education and g.get('education'):
+            education = extract_education(' '.join(str(e.get('degree') or '') for e in g['education'])) \
+                or (g['education'][0].get('degree') or None)
+        projects = g.get('projects', [])
+
+        # Text used for semantic similarity: name, contact details and
+        # personal attributes removed so they cannot influence the score.
+        redacted_text = redact_for_embedding(text_original, name=name)
 
         # Learning velocity label still runs off raw text keyword frequency
         learning_velocity = compute_learning_velocity(text_lower)
 
         # ── Semantic Similarity Score (SS) — paper §IV.C/D ──────────────
-        role_score = compute_role_match(text_lower, target_role, skills, job_description)
+        role_score = compute_role_match(redacted_text.lower(), target_role, skills, job_description)
 
         # ── Analytical Score components — paper §IV.E ───────────────────
         consistency_score = compute_consistency_score(skills, experience_years)
         resume_strength_score = compute_resume_strength_score(skills, education, experience_years)
 
-        validated_skills = validate_skills_from_text(skills, text_lower)
+        validated_skills = validate_skills_from_text(skills, text_original)
         valid_count = sum(1 for v in validated_skills if v['status'] == 'Valid')
         skill_validation_score = (
             round((valid_count / len(validated_skills)) * 100, 2)
@@ -922,6 +708,12 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
 
             # Experience and Education
             "experience_years": experience_years,
+            "experience_years_dated": experience['dated_years'],
+            "experience_years_claimed": claimed_years,
+            "experience_source": experience_source,
+            "employment_history": employment_history,
+            "projects": projects,
+            "other_skills": other_skills,
             "education": education,
 
             # Semantic similarity (paper §IV.C)
