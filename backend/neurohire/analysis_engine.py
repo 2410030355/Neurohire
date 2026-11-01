@@ -36,6 +36,7 @@ from .extraction import (
     find_skill_spans,
     merge_skills,
     redact_for_embedding,
+    strip_annotation_lines,
     get_gemini_client as _get_gemini_client,
 )
 
@@ -168,31 +169,45 @@ LEARNING_WORDS = [
 
 
 
-def _get_gemini_embedding(text: str) -> Optional[np.ndarray]:
+# Embedding task type sent to Gemini. SEMANTIC_SIMILARITY matches how the
+# vectors are used (cosine between résumé and JD). Set the env var to an empty
+# string to send no task type.
+GEMINI_EMBEDDING_TASK_TYPE = os.environ.get('GEMINI_EMBEDDING_TASK_TYPE', 'SEMANTIC_SIMILARITY').strip()
+
+
+def _get_gemini_embeddings(texts: List[str]) -> Optional[List[np.ndarray]]:
     """
-    Get a single text embedding via the Gemini API.
-    Returns None on any failure (no client, API error, malformed response) —
-    caller must fall back to TF-IDF. Never raises.
+    Embed several texts in ONE Gemini API call (résumé + job description
+    together: half the requests and latency of one call per text).
+    Returns None on any failure — caller falls back to TF-IDF. Never raises.
     """
     client = _get_gemini_client()
-    if client is None:
+    if client is None or not texts:
         return None
-
     try:
-        response = client.models.embed_content(
-            model=GEMINI_EMBEDDING_MODEL,
-            contents=text,
-        )
+        kwargs = {'model': GEMINI_EMBEDDING_MODEL, 'contents': list(texts)}
+        if GEMINI_EMBEDDING_TASK_TYPE:
+            kwargs['config'] = {'task_type': GEMINI_EMBEDDING_TASK_TYPE}
+        response = client.models.embed_content(**kwargs)
         embeddings = getattr(response, 'embeddings', None)
-        if not embeddings:
+        if not embeddings or len(embeddings) != len(texts):
             return None
-        values = getattr(embeddings[0], 'values', None)
-        if not values:
-            return None
-        return np.array(values)
+        vectors = []
+        for emb in embeddings:
+            values = getattr(emb, 'values', None)
+            if not values:
+                return None
+            vectors.append(np.asarray(values, dtype=float))
+        return vectors
     except Exception as e:
         logger.error(f"Gemini embedding request failed: {e}")
         return None
+
+
+def _get_gemini_embedding(text: str) -> Optional[np.ndarray]:
+    """Single-text wrapper, kept for existing callers."""
+    vectors = _get_gemini_embeddings([text])
+    return vectors[0] if vectors else None
 
 
 def _tfidf_similarity(resume_text: str, job_description_text: str) -> float:
@@ -238,10 +253,10 @@ def get_similarity_score(resume_text: str, job_description_text: str) -> float:
     resume_text = resume_text.strip()[:6000]
     job_description_text = job_description_text.strip()[:6000]
 
-    resume_embedding = _get_gemini_embedding(resume_text)
-    job_embedding = _get_gemini_embedding(job_description_text)
+    vectors = _get_gemini_embeddings([resume_text, job_description_text])
 
-    if resume_embedding is not None and job_embedding is not None:
+    if vectors is not None:
+        resume_embedding, job_embedding = vectors
         try:
             similarity = cosine_similarity([resume_embedding], [job_embedding])[0][0]
             return float(similarity * 100)
@@ -605,6 +620,10 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
         # Extract text (both lowercase and original case) — always needed,
         # regardless of extraction path, for scoring and phone lookup.
         text_lower, text_original = extract_text_from_pdf(file_path)
+        # Drop annotation lines (e.g. the evaluation files' "Ground Truth Label")
+        # so they can never influence extraction or similarity.
+        text_original = strip_annotation_lines(text_original)
+        text_lower = text_original.lower()
 
         # ── Structured extraction (paper §IV.B) ─────────────────────────
         # Deterministic regex/date parsing is the primary source for skills and

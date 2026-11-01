@@ -269,3 +269,62 @@ class AnalyzeResumeIntegrationTests(SimpleTestCase):
         embedded_text = sim.call_args[0][0]
         for leaked in ["priya", "nair", "gmail", "98765", "female", "date of birth"]:
             self.assertNotIn(leaked, embedded_text)
+
+
+class AnnotationStrippingTests(SimpleTestCase):
+    """Evaluation résumés carry their own label; it must never reach scoring."""
+
+    def test_label_lines_removed(self):
+        text = "Jane Doe\nGround Truth Label: Relevant\nground_truth: 1\nRelevance label - high\nReact developer"
+        out = ex.strip_annotation_lines(text)
+        self.assertNotIn("Relevant", out)
+        self.assertNotIn("ground", out.lower())
+        self.assertIn("React developer", out)
+
+    def test_ordinary_lines_untouched(self):
+        text = "Worked on ground-up rewrite of the truth table UI"
+        self.assertEqual(ex.strip_annotation_lines(text), text)
+
+    @patch("neurohire.analysis_engine.extract_with_gemini", return_value=None)
+    @patch("neurohire.analysis_engine.get_similarity_score", return_value=60.0)
+    def test_label_never_reaches_similarity(self, sim, _g):
+        from neurohire.analysis_engine import analyze_resume
+        path = AnalyzeResumeIntegrationTests()._docx.__func__(self, SAMPLE_CV + "\nGround Truth Label: Highly Relevant")
+        analyze_resume(path, "Senior Frontend Developer", "React engineer")
+        self.assertNotIn("ground truth", sim.call_args[0][0])
+        self.assertNotIn("highly relevant", sim.call_args[0][0])
+
+
+class EmbeddingCallTests(SimpleTestCase):
+
+    def _client(self, vectors):
+        client = MagicMock()
+        client.models.embed_content.return_value = MagicMock(
+            embeddings=[MagicMock(values=v) for v in vectors])
+        return client
+
+    def test_one_batched_call_for_resume_and_jd(self):
+        from neurohire import analysis_engine as ae
+        client = self._client([[1.0, 0.0], [1.0, 0.0]])
+        with patch.object(ae, "_get_gemini_client", return_value=client):
+            score = ae.get_similarity_score("react developer", "react engineer")
+        self.assertAlmostEqual(score, 100.0, places=4)
+        client.models.embed_content.assert_called_once()
+        kwargs = client.models.embed_content.call_args.kwargs
+        self.assertEqual(kwargs["contents"], ["react developer", "react engineer"])
+        self.assertEqual(kwargs["config"], {"task_type": "SEMANTIC_SIMILARITY"})
+
+    def test_falls_back_to_tfidf_when_gemini_unavailable(self):
+        from neurohire import analysis_engine as ae
+        with patch.object(ae, "_get_gemini_client", return_value=None):
+            same = ae.get_similarity_score("react typescript redux", "react typescript redux")
+            other = ae.get_similarity_score("react typescript redux", "oracle cobol mainframe")
+        self.assertGreater(same, other)
+
+    def test_malformed_response_falls_back(self):
+        from neurohire import analysis_engine as ae
+        client = self._client([[1.0, 0.0]])  # one vector for two texts
+        with patch.object(ae, "_get_gemini_client", return_value=client), \
+                patch.object(ae, "_tfidf_similarity", return_value=12.0) as tf:
+            self.assertEqual(ae.get_similarity_score("a b", "c d"), 12.0)
+        tf.assert_called_once()

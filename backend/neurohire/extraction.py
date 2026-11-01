@@ -476,6 +476,19 @@ def extract_education(text: str) -> Optional[str]:
     return best
 
 
+# Evaluation/annotation lines that must never reach scoring. The 12 evaluation
+# résumés contain their own "Ground Truth Label: …" line; left in, it leaks the
+# answer into the similarity score.
+_ANNOTATION_LINE_RE = re.compile(
+    r"^[ \t]*(?:ground[\s_-]*truth(?:[\s_-]*label)?|relevance[\s_-]*label|gt[\s_-]*label)\b.*$\n?",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def strip_annotation_lines(text: str) -> str:
+    return _ANNOTATION_LINE_RE.sub("", text or "")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # 4. Redaction (before embedding)
 # ════════════════════════════════════════════════════════════════════════════
