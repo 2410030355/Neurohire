@@ -276,6 +276,10 @@ from django.test import Client, override_settings
 
 from neurohire.models import UserProfile
 
+FAKE_FEEDBACK = {'updated': False, 's': 0, 'reason': 'test',
+                 'before': {'w_ss': 0.6, 'w_as': 0.4, 'version': 0},
+                 'after': {'w_ss': 0.6, 'w_as': 0.4, 'version': 0}}
+
 TRUSTED_ORIGIN = 'https://neurohire-bay.vercel.app'
 
 
@@ -365,14 +369,14 @@ class SecurityHardeningTests(TestCase):
         mock_delete.assert_called_once()
 
     # ── Decision log (drives the adaptive weights) ──────────────────────
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_decision_log_post_blocked_for_anonymous(self, mock_update):
         resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
                                 content_type='application/json', HTTP_ORIGIN=TRUSTED_ORIGIN)
         self.assertEqual(resp.status_code, 403)
         mock_update.assert_not_called()
 
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_decision_log_post_blocked_for_jobseeker(self, mock_update):
         self.client.force_login(self.seeker)
         resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
@@ -385,7 +389,7 @@ class SecurityHardeningTests(TestCase):
         self.client.force_login(self.recruiter)
         self.assertEqual(self.client.get('/api/ai-decision-logs/').status_code, 200)
 
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_decision_log_post_allowed_for_recruiter_from_trusted_origin(self, mock_update):
         """The real frontend sends no CSRF token (it can't read a cross-site cookie);
         a trusted Origin must be enough, otherwise the dashboard breaks."""
@@ -395,7 +399,7 @@ class SecurityHardeningTests(TestCase):
         self.assertEqual(resp.status_code, 201, resp.content)
         mock_update.assert_called_once()
 
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_decision_log_post_rejected_from_untrusted_origin(self, mock_update):
         """Cross-site request forgery: logged-in recruiter's browser, attacker's page."""
         self.client.force_login(self.recruiter)
@@ -404,7 +408,7 @@ class SecurityHardeningTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         mock_update.assert_not_called()
 
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_decision_log_post_rejected_with_null_origin(self, mock_update):
         self.client.force_login(self.recruiter)
         resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
@@ -412,7 +416,7 @@ class SecurityHardeningTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         mock_update.assert_not_called()
 
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_decision_log_post_rejected_from_untrusted_referer_without_origin(self, mock_update):
         self.client.force_login(self.recruiter)
         resp = self.client.post('/api/ai-decision-logs/', self._decision_payload(),
@@ -421,7 +425,7 @@ class SecurityHardeningTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         mock_update.assert_not_called()
 
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_decision_log_rejects_form_encoded_body(self, mock_update):
         """Only JSON is accepted, so a plain HTML form (no CORS preflight) can't post."""
         self.client.force_login(self.recruiter)
@@ -432,7 +436,7 @@ class SecurityHardeningTests(TestCase):
 
     @override_settings(CORS_ALLOWED_ORIGINS=[TRUSTED_ORIGIN],
                        CORS_ORIGIN_WHITELIST=['http://localhost:5173'])
-    @patch('neurohire.views.update_weights')
+    @patch('neurohire.feedback.record_feedback', return_value=FAKE_FEEDBACK)
     def test_origin_trust_matches_what_cors_allows(self, mock_update):
         """CORS ignores CORS_ORIGIN_WHITELIST when CORS_ALLOWED_ORIGINS is set,
         so the CSRF origin check must ignore it too."""

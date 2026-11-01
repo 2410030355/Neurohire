@@ -25,6 +25,8 @@ from neurohire.views import (
     ProfileUpdateView,
     ChatbotView,
     RankCandidatesView,
+    FeedbackWeightsView,
+    FeedbackWeightsResetView,
 )
 router = DefaultRouter()
 router.register(r"candidates", CandidateViewSet, basename="candidates")
@@ -54,5 +56,7 @@ urlpatterns = [
     path("api/auth/profile/", csrf_exempt(ProfileUpdateView.as_view())),
     path("api/chatbot/", csrf_exempt(ChatbotView.as_view())),
     path("api/rank/", RankCandidatesView.as_view()),
+    path("api/feedback/weights/", FeedbackWeightsView.as_view()),
+    path("api/feedback/weights/reset/", FeedbackWeightsResetView.as_view()),
     path("auth/", include("social_django.urls", namespace="social")),
 ]

@@ -28,3 +28,6 @@ services:
         scope: runtime
       - key: RECRUITER_ALLOWED_DOMAINS
         scope: runtime
+      # Use learned feedback weights for scoring (default 0 = fixed 0.6 / 0.4)
+      - key: ADAPTIVE_WEIGHTS
+        value: "0"

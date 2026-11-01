@@ -32,9 +32,11 @@ from .serializers import (
 from .authentication import OriginCheckedSessionAuthentication
 from .access import is_allowed_recruiter_email, user_email, recruiter_signup_hint
 from .analysis_engine import (
-    analyze_resume, github_search_service, update_weights, get_current_weights,
+    analyze_resume, github_search_service, get_current_weights,
     get_similarity_batch, extract_skills,
 )
+from . import feedback
+from .mongo_client import mongo_get_ranking
 from .ranking import rank_candidates
 from .mongo_client import (
     mongo_insert_candidate, mongo_get_candidate,
@@ -213,45 +215,92 @@ class AIDecisionLogViewSet(viewsets.ModelViewSet):
     authentication_classes = [OriginCheckedSessionAuthentication]
     parser_classes = [JSONParser]
     
-    def create(self, request, *args, **kwargs):
+    @staticmethod
+    def _num(v):
+        try:
+            return None if v in (None, '') else float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _components(self, log):
         """
-        Create an AIDecisionLog and trigger adaptive weight update.
+        SS and AS of the decided candidate, most trustworthy source first:
+        the stored ranking run, then the stored candidate, then the request.
         """
-        response = super().create(request, *args, **kwargs)
-        
-        # Extract recruiter_decision and role_match_score from request
-        recruiter_decision = request.data.get('recruiter_decision')
-        role_match_score = request.data.get('role_match_score')
-        
-        if recruiter_decision:
-            # Trigger weight update based on recruiter decision
-            update_weights(recruiter_decision, match_score=role_match_score)
-            logger.info(f"Weights updated after '{recruiter_decision}' decision. "
-                       f"Current weights: {get_current_weights()}")
-        
-        return response
-    
-    def update(self, request, *args, **kwargs):
-        """
-        Update an AIDecisionLog and trigger adaptive weight update if decision changed.
-        """
-        # Get the old decision before update
-        instance = self.get_object()
-        old_decision = instance.recruiter_decision if instance else None
-        
-        response = super().update(request, *args, **kwargs)
-        
-        # Extract new recruiter_decision from request
-        recruiter_decision = request.data.get('recruiter_decision')
-        role_match_score = request.data.get('role_match_score')
-        
-        # Only update weights if decision actually changed
-        if recruiter_decision and recruiter_decision != old_decision:
-            update_weights(recruiter_decision, match_score=role_match_score)
-            logger.info(f"Weights updated after decision change from '{old_decision}' to '{recruiter_decision}'. "
-                       f"Current weights: {get_current_weights()}")
-        
-        return response
+        ref = log.candidate_ref
+        if log.ranking_id and ref:
+            run = mongo_get_ranking(log.ranking_id)
+            for r in (run or {}).get('results', []):
+                if r.get('candidate_id') == ref:
+                    return r.get('semantic_score'), r.get('analytical_score'), r.get('final_score'), 'ranking'
+        if ref:
+            doc = mongo_get_candidate(ref)
+            if doc and (doc.get('semantic_score') is not None or doc.get('analytical_score') is not None):
+                return doc.get('semantic_score'), doc.get('analytical_score'), doc.get('final_score'), 'candidate'
+        return log.semantic_score, log.analytical_score, log.final_score, 'request'
+
+    def _apply_feedback(self, log, previous_decision=None):
+        ss, as_score, fs, source = self._components(log)
+        result = feedback.record_feedback(
+            log.recruiter_decision, ss, as_score, previous_decision=previous_decision,
+            context={'decision_log_id': log.pk, 'candidate_ref': log.candidate_ref,
+                     'ranking_id': log.ranking_id, 'score_source': source,
+                     'user_id': getattr(self.request.user, 'pk', None)})
+        log.semantic_score, log.analytical_score = ss, as_score
+        log.final_score = fs if fs is not None else log.final_score
+        log.weight_update = {
+            'updated': result['updated'], 's': result['s'], 'reason': result['reason'],
+            'score_source': source,
+            'w_ss_before': result['before']['w_ss'], 'w_ss_after': result['after']['w_ss'],
+            'version': result['after'].get('version'),
+        }
+        log.save(update_fields=['semantic_score', 'analytical_score', 'final_score', 'weight_update'])
+        return log.weight_update
+
+    def perform_create(self, serializer):
+        """Log a recruiter decision and apply the feedback rule (paper §IV.H)."""
+        log = serializer.save()
+        self._apply_feedback(log)
+
+    def perform_update(self, serializer):
+        """A changed decision applies s_new − s_old (undoes the earlier update)."""
+        previous = serializer.instance.recruiter_decision
+        log = serializer.save()
+        if log.recruiter_decision != previous:
+            self._apply_feedback(log, previous_decision=previous)
+
+
+class FeedbackWeightsView(APIView):
+    """
+    GET  /api/feedback/weights/        learned weights, weights FS uses, history
+    POST /api/feedback/weights/reset/  back to 0.6 / 0.4 (staff only)
+    """
+    parser_classes = [JSONParser]
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+
+    def get(self, request):
+        learned = feedback.get_learned_weights()
+        used = feedback.get_scoring_weights()
+        return Response({
+            'adaptive_enabled': feedback.adaptive_enabled(),
+            'learning_rate': feedback.ETA,
+            'bounds': [feedback.W_MIN, feedback.W_MAX],
+            'configured': {k: v for k, v in feedback.default_weights().items() if k != 'version'},
+            'learned': {'w_ss': learned['w_ss'], 'w_as': learned['w_as'], 'version': learned.get('version', 0)},
+            'in_use': used,
+            'history': feedback.feedback_history(limit=int(request.GET.get('limit', 20) or 20)),
+        })
+
+
+class FeedbackWeightsResetView(APIView):
+    parser_classes = [JSONParser]
+    permission_classes = [IsAdminUser]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+
+    def post(self, request):
+        d = feedback.reset_weights()
+        return Response({'w_ss': d['w_ss'], 'w_as': d['w_as'], 'version': d['version']})
 
 
 class InterviewViewSet(viewsets.ModelViewSet):
@@ -662,7 +711,9 @@ class RankCandidatesView(APIView):
             'lv_raw': d.get('lv_raw'), 'embedding_cache': d.get('embedding_cache'),
         } for d in docs]
 
+        weights = feedback.get_scoring_weights()
         ranked = rank_candidates(candidates, jd, get_similarity_batch, extract_skills,
+                                 w_ss=weights['w_ss'], w_as=weights['w_as'],
                                  components=set(components))
 
         for cand, cache in zip(candidates, ranked['new_embeddings']):
@@ -696,6 +747,7 @@ class RankCandidatesView(APIView):
             'total_ranked': len(ranked['results']),
             'similarity_method': ranked['method'],
             'weights': ranked['weights'],
+            'weights_source': weights['source'],
             'components': ranked['components'],
             'lv_bounds': ranked['lv_bounds'],
             'jd_skills': ranked['jd_skills'],
