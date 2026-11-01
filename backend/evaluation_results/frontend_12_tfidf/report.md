@@ -10,8 +10,8 @@
 | k | `5` |
 | bootstrap replicates | `2000` |
 | seed | `42` |
-| code version | `e85e7f1` |
-| run at | `2026-11-01 10:56 UTC` |
+| code version | `146181b` |
+| run at | `2026-11-01 10:58 UTC` |
 
 12 constructed résumés (not real people) for one Frontend Developer role: 7 frontend (React/Vue) labelled relevant, 5 non-frontend (Java backend, Python data, PHP, Android, junior UI) labelled not relevant. Labels were assigned by the authors and are stored in each file's 'Ground Truth Label' line, which is removed before any scoring.
 
