@@ -376,7 +376,7 @@ def extract_experience(text: str, today: Optional[date] = None) -> Dict:
     Work experience from date ranges in the résumé.
 
     Returns:
-      positions      [{title, start, end, months, section}] in résumé order
+      positions      [{title, start, end, months, section, line}] in résumé order
       dated_years    total of merged (non-overlapping) work periods, or None
       claimed_years  largest "N years of experience" statement, or None
       years          dated_years if available, else claimed_years, else None
@@ -393,7 +393,7 @@ def extract_experience(text: str, today: Optional[date] = None) -> Dict:
     positions, intervals = [], []
     prev_text = ""
 
-    for line in lines:
+    for line_no, line in enumerate(lines):
         kind = _heading_kind(line)
         if kind:
             section = kind
@@ -415,6 +415,7 @@ def extract_experience(text: str, today: Optional[date] = None) -> Dict:
                 "end": _month_label(iv[1] - 1),
                 "months": iv[1] - iv[0],
                 "section": section or "unlabelled",
+                "line": line_no,
             })
             intervals.append(iv)
         if line.strip():

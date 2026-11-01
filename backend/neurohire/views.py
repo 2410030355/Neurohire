@@ -343,13 +343,27 @@ class ResumeUploadView(APIView):
             'source':                 'resume_upload',
             'status':                 'analyzed',
             # AI scores
-            'consistency_score':      analysis.get('consistency_score', 0),
-            'skill_validation_score': analysis.get('skill_validation_score', 0),
-            'learning_velocity':      analysis.get('learning_velocity', 'Medium'),
-            'role_match_score':       analysis.get('role_match_score', 0),
+            # Paper §IV scores (None = not computable, never silently 0)
+            'semantic_score':         analysis.get('semantic_score'),
+            'role_match_score':       analysis.get('role_match_score'),
+            'similarity_method':      analysis.get('similarity_method'),
+            'consistency_score':      analysis.get('consistency_score'),
+            'consistency_flags':      analysis.get('consistency_flags', []),
+            'skill_validation_score': analysis.get('skill_validation_score'),
+            'skill_evidence_band':    analysis.get('skill_evidence_band'),
+            'lv_raw':                 analysis.get('lv_raw'),
+            'lv_score':               analysis.get('lv_score'),
+            'lv_new_skills':          analysis.get('lv_new_skills', []),
+            'lv_span_years':          analysis.get('lv_span_years'),
+            'learning_velocity':      analysis.get('learning_velocity', 'N/A'),
+            'analytical_score':       analysis.get('analytical_score'),
+            'missing_components':     analysis.get('missing_components', []),
+            'final_score':            analysis.get('final_score'),
+            'score_weights':          analysis.get('score_weights'),
             'final_fit':              analysis.get('final_fit', 'Medium'),
+            'jd_skills':              analysis.get('jd_skills', []),
             'explainability':         analysis.get('explainability', ''),
-            'resume_strength_score':  analysis.get('resume_strength_score', 0),
+            'resume_strength_score':  (analysis.get('resume_strength_score') or 0),
             # Profile
             'skills':                 analysis.get('skills', []),
             'validated_skills':       analysis.get('validated_skills', []),
@@ -427,9 +441,9 @@ class SeekerResumeView(APIView):
         """Generate seeker-focused improvement suggestions from analysis data."""
         tips = []
         skills = analysis.get('skills', [])
-        experience = analysis.get('experience_years', 0)
-        strength = analysis.get('resume_strength_score', 0)
-        consistency = analysis.get('consistency_score', 0)
+        experience = (analysis.get('experience_years') or 0)
+        strength = (analysis.get('resume_strength_score') or 0)
+        consistency = (analysis.get('consistency_score') or 0)
         education = analysis.get('education', '')
 
         # Skill count feedback
@@ -439,7 +453,7 @@ class SeekerResumeView(APIView):
             tips.append("You have a decent skill set. Consider adding 3-4 more tools or technologies you've used.")
 
         # Role match feedback
-        role_score = analysis.get('role_match_score', 0)
+        role_score = (analysis.get('role_match_score') or 0)
         if role_score < 40:
             tips.append(f"Your current skills don't closely match '{target_role}'. Focus on learning the core technologies for this role.")
         elif role_score < 65:
@@ -488,7 +502,7 @@ class SeekerResumeView(APIView):
         """Identify what the seeker is already doing well."""
         strengths = []
         skills = analysis.get('skills', [])
-        experience = analysis.get('experience_years', 0)
+        experience = (analysis.get('experience_years') or 0)
         velocity = analysis.get('learning_velocity', 'Medium')
 
         if len(skills) >= 8:
@@ -499,7 +513,7 @@ class SeekerResumeView(APIView):
             strengths.append("High learning velocity — you pick up new technologies quickly")
         if analysis.get('education'):
             strengths.append(f"Strong educational background: {analysis['education']}")
-        if analysis.get('role_match_score', 0) >= 65:
+        if (analysis.get('role_match_score') or 0) >= 65:
             strengths.append("Good alignment with your target role")
         if not strengths:
             strengths.append("You have a foundation to build on — focus on targeted skill development")
@@ -539,8 +553,8 @@ class SeekerResumeView(APIView):
         strengths = self._generate_strengths(analysis)
 
         # Overall readiness score (seeker-friendly, not recruiter score)
-        role_score = analysis.get('role_match_score', 0)
-        strength_score = analysis.get('resume_strength_score', 0)
+        role_score = (analysis.get('role_match_score') or 0)
+        strength_score = (analysis.get('resume_strength_score') or 0)
         readiness = round((role_score * 0.5) + (strength_score * 0.5))
 
         # Compute role_fit label from role_score
@@ -562,7 +576,7 @@ class SeekerResumeView(APIView):
             'role_alignment':        round(role_score),
             'final_fit':             role_fit,                 # for FitBadge
             'learning_velocity':     analysis.get('learning_velocity', 'Medium'),
-            'experience_years':      analysis.get('experience_years', 0),
+            'experience_years':      (analysis.get('experience_years') or 0),
             'education':             analysis.get('education', ''),
 
             # Skills — named to match ResumeImprover.jsx exactly

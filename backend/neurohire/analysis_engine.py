@@ -38,6 +38,19 @@ from .extraction import (
     redact_for_embedding,
     strip_annotation_lines,
     get_gemini_client as _get_gemini_client,
+    _heading_kind,
+)
+from . import scoring
+from .scoring import (
+    classify_skill_evidence,
+    compute_consistency,
+    compute_learning_velocity_raw,
+    compute_skill_validation,
+    evidence_band,
+    lv_label,
+    score_candidate,
+    similarity_to_score,
+    skill_timeline,
 )
 
 
@@ -155,12 +168,6 @@ def update_weights(recruiter_decision: str, match_score: float = None):
 # Load weights on module initialization
 _load_weights_from_disk()
 
-LEARNING_WORDS = [
-    "learned", "built", "developed", "improved", "optimized",
-    "created", "designed", "implemented", "architected", "led",
-    "managed", "delivered", "achieved", "spearheaded", "initiated",
-    "enhanced", "streamlined", "automated", "deployed", "scaled"
-]
 
 
 # ==============================
@@ -210,62 +217,60 @@ def _get_gemini_embedding(text: str) -> Optional[np.ndarray]:
     return vectors[0] if vectors else None
 
 
-def _tfidf_similarity(resume_text: str, job_description_text: str) -> float:
+def _tfidf_cosine(resume_text: str, job_description_text: str) -> Optional[float]:
     """
-    Lightweight offline fallback for semantic similarity — no model download,
-    no torch, minimal memory footprint. Used when the Gemini embedding call
-    is unavailable (no API key, network error, rate limit, etc).
+    Offline fallback (paper §IV.C.1): TF-IDF vectors + cosine. A lexical
+    representation, not a semantic embedding. None if it cannot be computed.
     """
     try:
         from sklearn.feature_extraction.text import TfidfVectorizer
-
         vectorizer = TfidfVectorizer(stop_words='english')
         tfidf_matrix = vectorizer.fit_transform([resume_text, job_description_text])
-        similarity = cosine_similarity(tfidf_matrix[0], tfidf_matrix[1])[0][0]
-        return float(similarity * 100)
+        return float(cosine_similarity(tfidf_matrix[0], tfidf_matrix[1])[0][0])
     except Exception as e:
         logger.error(f"TF-IDF fallback similarity failed: {e}")
-        return 50.0
+        return None
 
 
-def get_similarity_score(resume_text: str, job_description_text: str) -> float:
+def _tfidf_similarity(resume_text: str, job_description_text: str) -> float:
+    """TF-IDF cosine × 100 (kept for existing callers)."""
+    cos = _tfidf_cosine(resume_text, job_description_text)
+    return 0.0 if cos is None else float(cos * 100)
+
+
+def get_similarity_details(resume_text: str, job_description_text: str) -> Dict:
     """
-    Compute semantic similarity between resume and job description.
+    SS_i = cosine(e_r, e_j) (paper eq. C.2), reported x100 and clipped to 0-100.
 
-    Tries the Gemini embedding API first (no local model — keeps the process
-    memory footprint small). Falls back to a lightweight TF-IDF cosine
-    similarity (scikit-learn, already a dependency) if the Gemini call fails
-    for any reason — no API key, network error, rate limit, malformed
-    response — so this function never hard-fails and never needs PyTorch.
-
-    Args:
-        resume_text: Full resume or job seeker profile text
-        job_description_text: Job description or target role text
-
-    Returns:
-        Similarity score as a percentage (0-100)
+    Representation: Gemini embeddings (gemini-embedding-001) in one batched
+    call; TF-IDF cosine if Gemini is unavailable. Returns
+    {'score': float|None, 'cosine': float|None, 'method': 'gemini'|'tfidf'|'none'}.
     """
-    if not resume_text or not job_description_text:
-        return 50.0
+    if not resume_text or not resume_text.strip() or not job_description_text or not job_description_text.strip():
+        return {'score': None, 'cosine': None, 'method': 'none'}
 
-    # Cap input length — keeps request size and latency predictable, and
-    # mirrors the same cap already applied to the Gemini extraction call.
     resume_text = resume_text.strip()[:6000]
     job_description_text = job_description_text.strip()[:6000]
 
     vectors = _get_gemini_embeddings([resume_text, job_description_text])
-
     if vectors is not None:
-        resume_embedding, job_embedding = vectors
         try:
-            similarity = cosine_similarity([resume_embedding], [job_embedding])[0][0]
-            return float(similarity * 100)
+            cos = float(cosine_similarity([vectors[0]], [vectors[1]])[0][0])
+            return {'score': similarity_to_score(cos), 'cosine': round(cos, 6), 'method': 'gemini'}
         except Exception as e:
             logger.error(f"Error computing Gemini embedding similarity: {e}")
-            # fall through to TF-IDF below
 
     logger.info("Gemini embeddings unavailable — using TF-IDF fallback for similarity score.")
-    return _tfidf_similarity(resume_text, job_description_text)
+    cos = _tfidf_cosine(resume_text, job_description_text)
+    if cos is None:
+        return {'score': None, 'cosine': None, 'method': 'none'}
+    return {'score': similarity_to_score(cos), 'cosine': round(cos, 6), 'method': 'tfidf'}
+
+
+def get_similarity_score(resume_text: str, job_description_text: str) -> float:
+    """SS on 0-100 (0 if it cannot be computed). Kept for existing callers."""
+    score = get_similarity_details(resume_text, job_description_text)['score']
+    return 0.0 if score is None else score
 
 
 # Email and phone regex patterns
@@ -389,125 +394,38 @@ def extract_name(text: str) -> Optional[str]:
 # Intelligence Scores
 # ==============================
 
-def compute_learning_velocity(text: str) -> str:
+# Paper-exact scoring lives in scoring.py; these wrappers keep the old names.
+
+def compute_role_match(resume_text: str, target_role: str, skills: List[str] = None,
+                       job_description: str = "") -> Optional[float]:
     """
-    Learning velocity label — High / Medium / Low.
-    Based on growth-indicator keyword frequency in resume text.
+    Semantic similarity SS (paper §IV.C): cosine between the (redacted) résumé
+    and the job description — or the target role when no JD is given — x100.
+    No keyword bonus is added. None when there is nothing to match against.
     """
-    count = sum(1 for word in LEARNING_WORDS if word in text.lower())
-    if count >= 8:
-        return "High"
-    elif count >= 4:
-        return "Medium"
-    return "Low"
+    target = job_description.strip() if job_description and job_description.strip() else (target_role or '')
+    return get_similarity_details(resume_text, target)['score']
 
 
-def compute_learning_velocity_score(skills: List[str], experience_years: float) -> float:
-    """
-    Learning Velocity numeric score (paper §IV.E3).
-    Formula: LV = new_skills_count / max(1, years)
-    Normalised 0-100 using typical range cap of 10 skills/year as max.
-    """
-    if experience_years <= 0:
-        experience_years = 1.0
-    raw_lv = len(skills) / experience_years
-    # Normalise: cap at 10 skills/year as practical maximum
-    LV_MAX = 10.0
-    LV_MIN = 0.0
-    normalised = (raw_lv - LV_MIN) / (LV_MAX - LV_MIN)
-    return round(min(100.0, max(0.0, normalised * 100)), 2)
+def compute_consistency_score(skills: List[str], experience_years: Optional[float]) -> float:
+    """CS (paper §IV.D.1). See scoring.compute_consistency for flags."""
+    return compute_consistency(skills, experience_years)['score']
 
 
-def compute_role_match(resume_text: str, target_role: str, skills: List[str],
-                       job_description: str = "") -> float:
-    """
-    Role-Specific Suitability and Matching Analysis (paper §IV.E).
-    Uses Sentence Transformer embeddings + skill overlap boost.
-    """
-    match_target = job_description.strip() if job_description and job_description.strip() else target_role
-
-    if not match_target:
-        return 50.0
-
-    semantic_score = get_similarity_score(resume_text, match_target.lower())
-
-    jd_words = set(match_target.lower().split())
-    resume_skills = set(skills)
-    skill_overlap = sum(1 for s in resume_skills if any(w in s for w in jd_words))
-    skill_bonus = min(30, skill_overlap * 8)
-
-    if job_description and job_description.strip():
-        final_score = (0.70 * semantic_score) + (0.30 * (50 + skill_bonus))
-    else:
-        final_score = (0.60 * semantic_score) + (0.40 * (50 + skill_bonus))
-
-    return round(min(100, max(0, final_score)), 2)
+def validate_skills_from_text(skills: List[str], text: str) -> List[dict]:
+    """Valid / Partial / Unverified per skill (paper §IV.D.2)."""
+    return [classify_skill_evidence(skill, find_skill_spans(text, skill), text) for skill in skills]
 
 
-def compute_consistency_score(skills: List[str], experience_years: float) -> float:
-    """
-    Cross-document consistency analysis (paper §IV.A).
-    """
-    score = 100.0
-    skills_lower = [s.lower() for s in skills]
-
-    senior_skills = [
-        'kubernetes', 'terraform', 'system design', 'distributed systems',
-        'kafka', 'grpc', 'microservices', 'architect'
-    ]
-    has_senior = any(s in skills_lower for s in senior_skills)
-    if has_senior and experience_years < 1.5:
-        score -= 20
-
-    expected_max_skills = max(6, experience_years * 4)
-    if len(skills) > expected_max_skills:
-        score -= 12
-
-    advanced = {'kubernetes', 'terraform', 'kafka', 'pytorch', 'tensorflow'}
-    foundational = {'python', 'javascript', 'java', 'git', 'sql', 'linux'}
-    if bool(advanced & set(skills_lower)) and not bool(foundational & set(skills_lower)):
-        score -= 15
-
-    if experience_years >= 3 and len(skills) < 4:
-        score -= 18
-
-    return round(max(30.0, score), 2)
+def compute_skill_validation_score(validated_skills: List[dict]) -> Optional[float]:
+    """VS = V / N x 100; None when no skills were recognised."""
+    return compute_skill_validation(validated_skills)
 
 
-def validate_skills_from_text(skills: List[str], text_lower: str) -> List[dict]:
-    """
-    Evidence-backed skill validation (paper §IV.B).
-    """
-    ACTION_VERBS = [
-        'built', 'developed', 'designed', 'implemented', 'deployed',
-        'created', 'architected', 'led', 'managed', 'used', 'integrated',
-        'automated', 'optimised', 'optimized', 'migrated', 'scaled',
-        'wrote', 'delivered', 'maintained', 'configured', 'set up',
-    ]
-    validated = []
-    for skill in skills:
-        spans = find_skill_spans(text_lower, skill)
-        if not spans:
-            validated.append({'skill': skill, 'status': 'Unverified'})
-            continue
-        start, end = spans[0]
-        window = text_lower[max(0, start - 60):min(len(text_lower), end + 60)].lower()
-        if any(verb in window for verb in ACTION_VERBS):
-            validated.append({'skill': skill, 'status': 'Valid'})
-        elif len(spans) >= 2:
-            validated.append({'skill': skill, 'status': 'Partial'})
-        else:
-            validated.append({'skill': skill, 'status': 'Unverified'})
-    return validated
-
-
-def compute_skill_validation_score(skills: List[str], learning_velocity: str) -> float:
-    """Validate skills based on quantity and learning indicators."""
-    base_score = 40
-    skill_bonus = min(40, len(skills) * 4)
-    velocity_bonus = {"High": 20, "Medium": 10, "Low": 5}.get(learning_velocity, 5)
-    total = base_score + skill_bonus + velocity_bonus
-    return round(min(100, total), 2)
+def compute_learning_velocity(text: str, positions: List[Dict]) -> Dict:
+    """LV_raw = N_new / Δt from dated positions (paper §IV.D.3)."""
+    timeline = skill_timeline(text, positions, extract_skills, heading_fn=_heading_kind)
+    return compute_learning_velocity_raw(timeline)
 
 
 def compute_resume_strength_score(skills: List[str], education: Optional[str],
@@ -534,42 +452,26 @@ def compute_resume_strength_score(skills: List[str], education: Optional[str],
     return round(min(100, total), 2)
 
 
-def compute_analytical_score(consistency_score: float,
-                             skill_validation_score: float,
-                             lv_score: float) -> float:
-    """
-    Analytical Score (paper §IV.F): AS = (CS + VS + LV) / 3
-    """
-    return round((consistency_score + skill_validation_score + lv_score) / 3, 2)
+def compute_analytical_score(consistency_score: Optional[float],
+                             skill_validation_score: Optional[float],
+                             lv_score: Optional[float]) -> Optional[float]:
+    """AS = (CS + VS + LV) / 3 over available components (paper §IV.E.1)."""
+    return scoring.compute_analytical(consistency_score, skill_validation_score, lv_score)['score']
 
 
-def compute_final_score(semantic_score: float, analytical_score: float,
+def compute_final_score(semantic_score: Optional[float], analytical_score: Optional[float],
                         alpha: float = None, beta: float = None) -> float:
-    """
-    Final Score (paper §IV.G) with adaptive weights: FS = alpha * SS + beta * AS
-    """
-    if alpha is None or beta is None:
-        weights = get_current_weights()
-        alpha = weights['semantic_weight']
-        beta = weights['analytical_weight']
-
-    return round(alpha * semantic_score + beta * analytical_score, 2)
+    """FS = 0.6*SS + 0.4*AS with the configured weights (paper §IV.E.2)."""
+    return scoring.compute_final(semantic_score, analytical_score, alpha, beta)['score']
 
 
 def compute_final_fit(final_score: float) -> str:
-    """
-    Classify final fit from the combined Final Score.
-    Thresholds aligned to paper: High >= 70, Medium >= 40, Low < 40.
-    """
-    if final_score >= 70:
-        return "High"
-    elif final_score >= 40:
-        return "Medium"
-    return "Low"
+    """High >= 70, Medium >= 40, Low < 40."""
+    return scoring.final_fit(final_score)
 
 
 def generate_career_trajectory(skills: List[str], learning_velocity: str,
-                               experience_years: float) -> str:
+                               experience_years: Optional[float]) -> str:
     """Generate a meaningful career trajectory summary."""
     skill_count = len(skills)
 
@@ -580,16 +482,60 @@ def generate_career_trajectory(skills: List[str], learning_velocity: str,
     else:
         skill_level = "developing"
 
+    if experience_years is not None:
+        exp = f"{experience_years:.1f} years of experience"
+    else:
+        exp = "experience not stated with dates"
+    if learning_velocity == 'N/A':
+        lv = "learning velocity not measurable (needs dated positions)"
+    else:
+        lv = f"{learning_velocity.lower()} learning velocity"
     return (
         f"Candidate demonstrates {skill_level} technical expertise with "
-        f"{skill_count} identified skills, {learning_velocity.lower()} learning velocity, "
-        f"and {experience_years:.1f} years of experience."
+        f"{skill_count} identified skills, {lv}, and {exp}."
     )
 
 
 # ==============================
 # ✅ MAIN ANALYSIS FUNCTION
 # ==============================
+
+def _fmt(v, suffix=''):
+    return 'n/a' if v is None else f"{v:.0f}{suffix}"
+
+
+def _build_explanation(scores, similarity, consistency, validated_skills, lv, has_jd,
+                       experience_years, experience_source) -> str:
+    """Component-level account of how FS was computed (not a validity claim)."""
+    counts = {k: sum(1 for v in validated_skills if v['status'] == k) for k in ('Valid', 'Partial', 'Unverified')}
+    method = {'gemini': 'Gemini embeddings', 'tfidf': 'TF-IDF fallback', 'none': 'not computed'}[similarity['method']]
+    target = 'the job description' if has_jd else 'the target role'
+    if consistency['flags']:
+        cs_detail = " - " + "; ".join(f['message'] for f in consistency['flags'])
+    else:
+        cs_detail = " - no rule triggered"
+    if consistency['rules_skipped']:
+        cs_detail += " (experience-based rules skipped: no dated or stated experience)"
+    if lv['raw'] is not None:
+        lv_text = (f"Learning velocity (LV): {_fmt(scores['lv_score'])}/100 - {len(lv['new_skills'])} new skills "
+                   f"over {lv['span_years']} years ({lv['basis']}).")
+    else:
+        lv_text = "Learning velocity (LV): not available - needs at least two dated positions that mention skills."
+    parts = [
+        f"Semantic similarity (SS) to {target}: {_fmt(scores['semantic_score'])}/100 ({method}).",
+        f"Consistency (CS): {_fmt(scores['consistency_score'])}/100{cs_detail}.",
+        f"Skill validation (VS): {_fmt(scores['skill_validation_score'])}/100 - "
+        f"{counts['Valid']} valid, {counts['Partial']} partial, {counts['Unverified']} unverified.",
+        lv_text,
+        f"Analytical score (AS) = mean of {', '.join(scores['analytical_components']) or 'no components'}: "
+        f"{_fmt(scores['analytical_score'])}/100.",
+        f"Final score (FS) = {scores['weights']['SS']:g}*SS + {scores['weights']['AS']:g}*AS = "
+        f"{scores['final_score']:.0f}/100 ({scores['final_fit']} fit).",
+    ]
+    if experience_years is not None:
+        parts.append(f"Experience: {experience_years:.1f} years ({experience_source}).")
+    return ' '.join(parts)
+
 
 def analyze_resume(file_path: str, target_role: str = "", job_description: str = "") -> Dict:
     """
@@ -664,52 +610,45 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
         # Text used for semantic similarity: name, contact details and
         # personal attributes removed so they cannot influence the score.
         redacted_text = redact_for_embedding(text_original, name=name)
+        experience_known = experience_source != 'none'
+        years_for_rules = float(experience_years) if experience_known else None
 
-        # Learning velocity label still runs off raw text keyword frequency
-        learning_velocity = compute_learning_velocity(text_lower)
+        # ── SS: semantic similarity (paper §IV.C) ───────────────────────
+        has_jd = bool(job_description and job_description.strip())
+        match_target = job_description.strip() if has_jd else (target_role or '').strip()
+        similarity = get_similarity_details(redacted_text, match_target)
+        ss = similarity['score']
 
-        # ── Semantic Similarity Score (SS) — paper §IV.C/D ──────────────
-        role_score = compute_role_match(redacted_text.lower(), target_role, skills, job_description)
+        # ── CS: consistency (paper §IV.D.1) ─────────────────────────────
+        consistency = compute_consistency(skills, years_for_rules)
 
-        # ── Analytical Score components — paper §IV.E ───────────────────
-        consistency_score = compute_consistency_score(skills, experience_years)
-        resume_strength_score = compute_resume_strength_score(skills, education, experience_years)
-
+        # ── VS: skill validation (paper §IV.D.2) ────────────────────────
         validated_skills = validate_skills_from_text(skills, text_original)
-        valid_count = sum(1 for v in validated_skills if v['status'] == 'Valid')
-        skill_validation_score = (
-            round((valid_count / len(validated_skills)) * 100, 2)
-            if validated_skills else
-            compute_skill_validation_score(skills, learning_velocity)
-        )
+        vs = compute_skill_validation(validated_skills)
 
-        lv_score = compute_learning_velocity_score(skills, experience_years)
+        # ── LV: learning velocity (paper §IV.D.3) ───────────────────────
+        lv = compute_learning_velocity(text_original, experience['positions'])
 
-        analytical_score = compute_analytical_score(
-            consistency_score, skill_validation_score, lv_score
-        )
+        # ── AS and FS (paper §IV.E) ─────────────────────────────────────
+        scores = score_candidate(ss, consistency['score'], vs, lv['raw'])
+        learning_velocity = lv_label(scores['lv_score'])
 
-        final_score = compute_final_score(role_score, analytical_score)
-        final_fit = compute_final_fit(final_score)
+        resume_strength_score = compute_resume_strength_score(skills, education, experience_years)
+        career_trajectory = generate_career_trajectory(
+            skills, learning_velocity, experience_years if experience_known else None)
 
-        career_trajectory = generate_career_trajectory(skills, learning_velocity, experience_years)
+        # Skills the JD asks for that the résumé does not mention
+        jd_skills = extract_skills(job_description) if has_jd else []
+        missing_skills = [s for s in jd_skills if s not in skills]
 
-        missing_skills = [s for s in SKILL_KEYWORDS[:50] if s not in skills][:8]
-
-        jd_note = " Matched against full job description." if job_description and job_description.strip() else ""
-        explainability = (
-            f"Semantic match: {role_score:.0f}%.{jd_note} "
-            f"Analytical score: {analytical_score:.0f}/100 "
-            f"(Consistency: {consistency_score:.0f}, Skill validation: {skill_validation_score:.0f}, "
-            f"Learning velocity: {lv_score:.0f}). "
-            f"Final score: {final_score:.0f}/100. "
-            f"Profile shows {learning_velocity.lower()} learning velocity with "
-            f"{experience_years:.1f} years of experience."
-        )
+        explainability = _build_explanation(scores, similarity, consistency, validated_skills, lv,
+                                            has_jd, experience_years if experience_known else None,
+                                            experience_source)
 
         profile_summary = (
             f"{name or 'Candidate'} - {education or 'Education not specified'} | "
-            f"{len(skills)} skills | {experience_years:.1f} years experience"
+            f"{len(skills)} skills | "
+            + (f"{experience_years:.1f} years experience" if experience_known else "experience not dated")
         )
 
         logger.info(f"Successfully analyzed resume: {name or 'Unknown'} (extraction: {extraction_method})")
@@ -720,35 +659,51 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
             "email": email,
             "phone": phone,
 
-            # Skills and Learning
+            # Skills
             "skills": skills,
-            "learning_velocity": learning_velocity,
+            "other_skills": other_skills,
             "missing_skills": missing_skills,
+            "jd_skills": jd_skills,
 
             # Experience and Education
-            "experience_years": experience_years,
+            "experience_years": experience_years if experience_known else None,
             "experience_years_dated": experience['dated_years'],
             "experience_years_claimed": claimed_years,
             "experience_source": experience_source,
             "employment_history": employment_history,
             "projects": projects,
-            "other_skills": other_skills,
             "education": education,
 
-            # Semantic similarity (paper §IV.C)
-            "role_match_score": role_score,
+            # SS (paper §IV.C). role_match_score kept: it is the field the UI reads.
+            "semantic_score": scores['semantic_score'],
+            "role_match_score": scores['semantic_score'],
+            "similarity_method": similarity['method'],
+            "similarity_cosine": similarity['cosine'],
 
-            # Analytical score components (paper §IV.E-F)
-            "consistency_score": consistency_score,
-            "skill_validation_score": skill_validation_score,
-            "lv_score": lv_score,
-            "analytical_score": analytical_score,
+            # Analytical components (paper §IV.D)
+            "consistency_score": consistency['score'],
+            "consistency_flags": consistency['flags'],
+            "consistency_rules_skipped": consistency['rules_skipped'],
+            "skill_validation_score": vs,
+            "skill_evidence_band": evidence_band(vs),
+            "validated_skills": validated_skills,
+            "lv_raw": lv['raw'],
+            "lv_normalized": scores['lv_normalized'],
+            "lv_score": scores['lv_score'],
+            "lv_new_skills": lv['new_skills'],
+            "lv_span_years": lv['span_years'],
+            "lv_basis": lv['basis'],
+            "learning_velocity": learning_velocity,
 
-            # Final combined score (paper §IV.G: FS = 0.5*SS + 0.5*AS)
-            "final_score": final_score,
-            "final_fit": final_fit,
+            # Aggregation (paper §IV.E): AS = mean(CS, VS, LV); FS = 0.6*SS + 0.4*AS
+            "analytical_score": scores['analytical_score'],
+            "analytical_components": scores['analytical_components'],
+            "missing_components": scores['missing_components'],
+            "final_score": scores['final_score'],
+            "score_weights": scores['weights'],
+            "final_fit": scores['final_fit'],
 
-            # Supplementary
+            # Supplementary (not part of FS)
             "resume_strength_score": resume_strength_score,
 
             # Insights
@@ -756,10 +711,6 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
             "profile_summary": profile_summary,
             "explainability": explainability,
 
-            # Evidence-backed skill validation (paper §IV.B)
-            "validated_skills": validated_skills,
-
-            # Which extraction path produced name/email/skills/experience/education
             "extraction_method": extraction_method,
         }
 

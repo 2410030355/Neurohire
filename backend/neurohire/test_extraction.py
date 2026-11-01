@@ -253,7 +253,7 @@ class AnalyzeResumeIntegrationTests(SimpleTestCase):
         return f.name
 
     @patch("neurohire.analysis_engine.extract_with_gemini", return_value=None)
-    @patch("neurohire.analysis_engine.get_similarity_score", return_value=60.0)
+    @patch("neurohire.analysis_engine.get_similarity_details", return_value={"score": 60.0, "cosine": 0.6, "method": "tfidf"})
     def test_docx_pipeline(self, sim, _g):
         from neurohire.analysis_engine import analyze_resume
         r = analyze_resume(self._docx(SAMPLE_CV), "Senior Frontend Developer", "React TypeScript engineer")
@@ -286,7 +286,7 @@ class AnnotationStrippingTests(SimpleTestCase):
         self.assertEqual(ex.strip_annotation_lines(text), text)
 
     @patch("neurohire.analysis_engine.extract_with_gemini", return_value=None)
-    @patch("neurohire.analysis_engine.get_similarity_score", return_value=60.0)
+    @patch("neurohire.analysis_engine.get_similarity_details", return_value={"score": 60.0, "cosine": 0.6, "method": "tfidf"})
     def test_label_never_reaches_similarity(self, sim, _g):
         from neurohire.analysis_engine import analyze_resume
         path = AnalyzeResumeIntegrationTests()._docx.__func__(self, SAMPLE_CV + "\nGround Truth Label: Highly Relevant")
@@ -325,6 +325,6 @@ class EmbeddingCallTests(SimpleTestCase):
         from neurohire import analysis_engine as ae
         client = self._client([[1.0, 0.0]])  # one vector for two texts
         with patch.object(ae, "_get_gemini_client", return_value=client), \
-                patch.object(ae, "_tfidf_similarity", return_value=12.0) as tf:
+                patch.object(ae, "_tfidf_cosine", return_value=0.12) as tf:
             self.assertEqual(ae.get_similarity_score("a b", "c d"), 12.0)
         tf.assert_called_once()

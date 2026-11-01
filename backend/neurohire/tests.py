@@ -22,125 +22,123 @@ from neurohire.analysis_engine import (
     validate_skills_from_text,
     compute_role_match,
     compute_final_fit,
-    compute_skill_validation_score,
     compute_resume_strength_score,
 )
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Consistency Scoring (paper §IV.A)
+# Consistency Scoring (paper §IV.D.1) — exactly three rules, no floor
 # ════════════════════════════════════════════════════════════════════════════
 
 class ConsistencyScoreTests(TestCase):
 
     def test_clean_profile_scores_full_100(self):
-        """A profile with no contradictions should score 100."""
         skills = ['python', 'sql', 'git', 'linux']
-        score = compute_consistency_score(skills, experience_years=2.0)
-        self.assertEqual(score, 100.0)
+        self.assertEqual(compute_consistency_score(skills, experience_years=2.0), 100.0)
 
     def test_senior_skill_with_low_experience_is_penalised(self):
-        """Claiming Kubernetes with under 1.5yr experience should deduct 20 points."""
+        """Rule 1: Kubernetes with < 1.5 years deducts 20."""
         skills = ['kubernetes', 'python', 'git']
-        score = compute_consistency_score(skills, experience_years=0.5)
-        self.assertEqual(score, 80.0)
+        self.assertEqual(compute_consistency_score(skills, experience_years=0.5), 80.0)
 
     def test_too_many_skills_for_experience_is_penalised(self):
-        """Excessive skill count relative to experience should deduct 12 points."""
+        """Rule 2: more than K_max = max(6, 4Y) skills deducts 12."""
         many_skills = [f'skill_{i}' for i in range(20)]
-        score = compute_consistency_score(many_skills, experience_years=1.0)
-        self.assertLessEqual(score, 88.0)
+        self.assertEqual(compute_consistency_score(many_skills, experience_years=1.0), 88.0)
+
+    def test_skill_limit_boundary(self):
+        """Exactly K_max skills is allowed (rule uses >)."""
+        self.assertEqual(compute_consistency_score([f's{i}' for i in range(8)], 2.0), 100.0)
+        self.assertEqual(compute_consistency_score([f's{i}' for i in range(9)], 2.0), 88.0)
 
     def test_advanced_tool_without_foundation_is_penalised(self):
-        """Kubernetes without any foundational skill (python/git/sql/etc.) deducts 15."""
-        skills = ['kubernetes']
-        score = compute_consistency_score(skills, experience_years=2.0)
-        self.assertEqual(score, 85.0)
+        """Rule 3: Kubernetes without a foundational skill deducts 15."""
+        self.assertEqual(compute_consistency_score(['kubernetes'], experience_years=2.0), 85.0)
 
-    def test_high_experience_few_skills_is_penalised(self):
-        """3+ years experience but under 4 skills detected deducts 18 points."""
-        skills = ['python', 'git']
-        score = compute_consistency_score(skills, experience_years=5.0)
-        self.assertEqual(score, 82.0)
+    def test_no_fourth_rule_for_experienced_few_skills(self):
+        """The old '3+ years with < 4 skills' rule is not in the paper."""
+        self.assertEqual(compute_consistency_score(['python', 'git'], experience_years=5.0), 100.0)
 
-    def test_score_never_drops_below_floor_of_30(self):
-        """Multiple stacked violations should still floor at 30, never negative."""
-        skills = ['kubernetes', 'terraform', 'kafka']  # senior + advanced-without-foundation
-        score = compute_consistency_score(skills, experience_years=0.2)
-        self.assertGreaterEqual(score, 30.0)
+    def test_all_three_rules_stack_without_floor(self):
+        """100 - 20 - 12 - 15 = 53: deductions add up, no lower bound applied."""
+        skills = ['kubernetes', 'terraform', 'kafka'] + [f'x{i}' for i in range(5)]
+        self.assertEqual(compute_consistency_score(skills, experience_years=0.2), 53.0)
+
+    def test_unknown_experience_skips_experience_rules(self):
+        from neurohire.scoring import compute_consistency
+        r = compute_consistency(['kubernetes', 'python'] + [f'x{i}' for i in range(10)], None)
+        self.assertEqual(r['score'], 100.0)
+        self.assertEqual(len(r['rules_skipped']), 2)
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Evidence-Backed Skill Validation (paper §IV.B)
+# Skill validation (paper §IV.D.2)
 # ════════════════════════════════════════════════════════════════════════════
 
 class SkillValidationTests(TestCase):
 
     def test_skill_with_action_verb_nearby_is_valid(self):
-        """Skill mentioned near 'built'/'developed' etc. should be marked Valid."""
         text = "i built a payment system using python and deployed it on aws"
-        result = validate_skills_from_text(['python'], text)
-        self.assertEqual(result[0]['status'], 'Valid')
+        self.assertEqual(validate_skills_from_text(['python'], text)[0]['status'], 'Valid')
 
     def test_skill_mentioned_twice_without_verb_is_partial(self):
-        """Skill appearing 2+ times with no nearby action verb should be Partial."""
         text = "skills: react, javascript. familiar with react basics."
-        result = validate_skills_from_text(['react'], text)
-        self.assertEqual(result[0]['status'], 'Partial')
+        self.assertEqual(validate_skills_from_text(['react'], text)[0]['status'], 'Partial')
 
     def test_skill_not_in_text_is_unverified(self):
-        """A skill that never appears in the resume text should be Unverified."""
         text = "experienced python developer"
-        result = validate_skills_from_text(['kubernetes'], text)
-        self.assertEqual(result[0]['status'], 'Unverified')
+        self.assertEqual(validate_skills_from_text(['kubernetes'], text)[0]['status'], 'Unverified')
 
     def test_skill_mentioned_once_with_no_verb_is_unverified(self):
-        """Skill listed exactly once with zero evidence should be Unverified, not Partial."""
-        text = "skills include docker"
-        result = validate_skills_from_text(['docker'], text)
-        self.assertEqual(result[0]['status'], 'Unverified')
+        self.assertEqual(validate_skills_from_text(['docker'], "skills include docker")[0]['status'], 'Unverified')
 
     def test_multiple_skills_classified_independently(self):
-        """Each skill in the list should get its own independent classification."""
-        text = "built a react app, also know terraform basics. terraform terraform."
-        result = validate_skills_from_text(['react', 'terraform', 'rust'], text)
-        statuses = {r['skill']: r['status'] for r in result}
-        self.assertEqual(statuses['react'], 'Valid')
-        self.assertEqual(statuses['terraform'], 'Partial')
-        self.assertEqual(statuses['rust'], 'Unverified')
+        text = ("built a react app for the analytics team.\n"
+                + "x" * 80 + "\nalso know terraform basics. terraform terraform.")
+        statuses = {r['skill']: r['status'] for r in validate_skills_from_text(['react', 'terraform', 'rust'], text)}
+        self.assertEqual(statuses, {'react': 'Valid', 'terraform': 'Partial', 'rust': 'Unverified'})
+
+    def test_used_is_not_an_action_verb(self):
+        """Only the paper's verb list counts ('used' is not in it)."""
+        self.assertEqual(validate_skills_from_text(['docker'], "used docker")[0]['status'], 'Unverified')
+
+    def test_java_mention_inside_javascript_is_not_evidence(self):
+        r = validate_skills_from_text(['java'], "developed javascript widgets")[0]
+        self.assertEqual(r['status'], 'Unverified')
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Role Match Scoring (paper §IV.E)
+# Semantic similarity (paper §IV.C)
 # ════════════════════════════════════════════════════════════════════════════
 
 class RoleMatchTests(TestCase):
 
-    def test_empty_role_returns_neutral_score(self):
-        """No target role or JD provided should return the neutral default."""
-        score = compute_role_match("some resume text", "", [])
-        self.assertEqual(score, 50.0)
+    def test_empty_target_is_not_computable(self):
+        """Nothing to match against: SS is None, not a made-up neutral 50."""
+        self.assertIsNone(compute_role_match("some resume text", "", []))
 
     def test_relevant_resume_scores_higher_than_irrelevant(self):
-        """A resume closely matching the JD should score higher than an unrelated one."""
         jd = "looking for a react frontend developer with typescript and redux experience"
-        relevant_resume   = "experienced react developer skilled in typescript and redux state management"
-        irrelevant_resume = "java backend engineer with spring boot and oracle database experience"
-
-        relevant_score   = compute_role_match(relevant_resume,   "Frontend Developer", ['react', 'typescript', 'redux'], jd)
-        irrelevant_score = compute_role_match(irrelevant_resume, "Frontend Developer", ['java', 'spring boot'], jd)
-
-        self.assertGreater(relevant_score, irrelevant_score)
+        relevant = compute_role_match("experienced react developer skilled in typescript and redux state management",
+                                      "Frontend Developer", [], jd)
+        irrelevant = compute_role_match("java backend engineer with spring boot and oracle database experience",
+                                        "Frontend Developer", [], jd)
+        self.assertGreater(relevant, irrelevant)
 
     def test_score_is_within_valid_bounds(self):
-        """Role match score should always be between 0 and 100."""
         score = compute_role_match("python django developer", "Backend Developer", ['python', 'django'])
         self.assertGreaterEqual(score, 0)
         self.assertLessEqual(score, 100)
 
+    def test_no_keyword_bonus(self):
+        """SS is cosine only: listing skills cannot raise it."""
+        a = compute_role_match("react developer", "react", [], "react")
+        b = compute_role_match("react developer", "react", ['react', 'redux', 'jest'], "react")
+        self.assertEqual(a, b)
+
 
 # ════════════════════════════════════════════════════════════════════════════
-# Final Fit Classification
+# Final fit thresholds
 # ════════════════════════════════════════════════════════════════════════════
 
 class FinalFitTests(TestCase):
@@ -149,7 +147,7 @@ class FinalFitTests(TestCase):
         self.assertEqual(compute_final_fit(85), 'High')
 
     def test_medium_score_classified_as_medium_fit(self):
-        self.assertEqual(compute_final_fit(55), 'Medium')  # now uses final_score not role_score
+        self.assertEqual(compute_final_fit(55), 'Medium')
 
     def test_low_score_classified_as_low_fit(self):
         self.assertEqual(compute_final_fit(20), 'Low')
@@ -158,91 +156,44 @@ class FinalFitTests(TestCase):
         self.assertEqual(compute_final_fit(70), 'High')
 
     def test_boundary_at_40_is_medium(self):
-        self.assertEqual(compute_final_fit(40), 'Medium')  # paper threshold: Medium >= 40
+        self.assertEqual(compute_final_fit(40), 'Medium')
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# Skill Validation & Resume Strength Scores
-# ════════════════════════════════════════════════════════════════════════════
-
-class ScoringFunctionTests(TestCase):
-
-    def test_more_skills_increases_validation_score(self):
-        few_skills  = compute_skill_validation_score(['python'], 'Medium')
-        many_skills = compute_skill_validation_score(['python', 'django', 'sql', 'docker', 'aws'], 'Medium')
-        self.assertGreater(many_skills, few_skills)
-
-    def test_high_velocity_increases_validation_score(self):
-        low  = compute_skill_validation_score(['python', 'sql'], 'Low')
-        high = compute_skill_validation_score(['python', 'sql'], 'High')
-        self.assertGreater(high, low)
+class ResumeStrengthTests(TestCase):
 
     def test_resume_strength_caps_at_100(self):
-        many_skills = [f'skill_{i}' for i in range(50)]
-        score = compute_resume_strength_score(many_skills, "PhD", experience_years=20)
+        score = compute_resume_strength_score([f'skill_{i}' for i in range(50)], "PhD", experience_years=20)
         self.assertLessEqual(score, 100.0)
 
     def test_resume_strength_increases_with_education_level(self):
-        no_edu  = compute_resume_strength_score(['python'], None, 2.0)
-        phd_edu = compute_resume_strength_score(['python'], 'PhD', 2.0)
-        self.assertGreater(phd_edu, no_edu)
+        self.assertGreater(compute_resume_strength_score(['python'], 'PhD', 2.0),
+                           compute_resume_strength_score(['python'], None, 2.0))
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# Paper Formula Functions (§IV.F, §IV.G)
+# Paper formulas (§IV.E)
 # ════════════════════════════════════════════════════════════════════════════
 
 class PaperFormulaTests(TestCase):
 
     def test_analytical_score_is_mean_of_three_components(self):
-        """AS = (CS + VS + LV) / 3 — must equal exact arithmetic mean."""
         from neurohire.analysis_engine import compute_analytical_score
-        score = compute_analytical_score(80, 60, 70)
-        self.assertAlmostEqual(score, 70.0, places=1)
+        self.assertAlmostEqual(compute_analytical_score(80, 60, 70), 70.0, places=2)
 
-    def test_final_score_is_weighted_sum(self):
-        """FS = 0.5 * SS + 0.5 * AS with default weights."""
+    def test_final_score_is_0_6_ss_plus_0_4_as(self):
         from neurohire.analysis_engine import compute_final_score
-        score = compute_final_score(80, 60)
-        self.assertAlmostEqual(score, 70.0, places=1)
-
-    def test_lv_score_increases_with_more_skills_per_year(self):
-        """Higher skill count relative to experience = higher LV score."""
-        from neurohire.analysis_engine import compute_learning_velocity_score
-        low  = compute_learning_velocity_score(['python'], 5.0)       # 0.2/yr
-        high = compute_learning_velocity_score(['python','react','sql','docker','git','aws'], 1.0)  # 6/yr
-        self.assertGreater(high, low)
-
-    def test_lv_score_caps_at_100(self):
-        """LV should never exceed 100 regardless of inputs."""
-        from neurohire.analysis_engine import compute_learning_velocity_score
-        score = compute_learning_velocity_score([f's{i}' for i in range(100)], 0.5)
-        self.assertLessEqual(score, 100.0)
-
-    def test_lv_score_handles_zero_experience(self):
-        """Zero experience years should not cause division by zero."""
-        from neurohire.analysis_engine import compute_learning_velocity_score
-        score = compute_learning_velocity_score(['python', 'sql'], 0.0)
-        self.assertGreaterEqual(score, 0.0)
-        self.assertLessEqual(score, 100.0)
+        self.assertAlmostEqual(compute_final_score(80, 60), 72.0, places=2)
 
     def test_full_pipeline_produces_consistent_final_fit(self):
-        """High SS + high AS should always produce High final fit."""
-        from neurohire.analysis_engine import compute_analytical_score, compute_final_score, compute_final_fit
-        ss = 85.0
-        analytical = compute_analytical_score(90, 80, 75)
-        fs = compute_final_score(ss, analytical)
-        fit = compute_final_fit(fs)
-        self.assertEqual(fit, 'High')
+        from neurohire.analysis_engine import compute_analytical_score, compute_final_score
+        fs = compute_final_score(85.0, compute_analytical_score(90, 80, 75))
+        self.assertEqual(compute_final_fit(fs), 'High')
 
-    def test_low_ss_high_as_averages_to_medium(self):
-        """Low semantic + high analytical averages to Medium, not Low."""
-        from neurohire.analysis_engine import compute_analytical_score, compute_final_score, compute_final_fit
-        ss = 30.0  # low semantic match
-        analytical = compute_analytical_score(85, 80, 75)  # high analytical
-        fs = compute_final_score(ss, analytical)
-        # FS = 0.5*30 + 0.5*80 = 55 => Medium
-        self.assertEqual(fit := compute_final_fit(fs), 'Medium')
+    def test_low_ss_high_as_is_medium(self):
+        from neurohire.analysis_engine import compute_analytical_score, compute_final_score
+        fs = compute_final_score(30.0, compute_analytical_score(85, 80, 75))  # 0.6*30 + 0.4*80 = 50
+        self.assertAlmostEqual(fs, 50.0, places=2)
+        self.assertEqual(compute_final_fit(fs), 'Medium')
 
 
 # ════════════════════════════════════════════════════════════════════════════
