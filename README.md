@@ -79,3 +79,38 @@ Output is in the `dist/` folder. Point your web server or Django static files at
 - `src/api/http.js` -Shared API base URL and `jsonFetch` helper for Django REST
 - `src/pages/` - Seeker and recruiter auth, dashboards, home
 - `src/components/` - UI components, recruiter (analysis, talent search, scheduling), seeker (resume improver, mock interview, job board)
+
+## Backend tests
+
+```bash
+cd backend
+python manage.py test neurohire                         # all tests
+python manage.py test neurohire.tests.test_scoring      # one file
+```
+
+| File | Covers |
+|---|---|
+| `test_core.py` | consistency rules, skill validation, similarity, paper formulas, security/permissions |
+| `test_extraction.py` | skills, experience from dates, education, redaction, Gemini extraction |
+| `test_scoring.py` | SS, CS, VS, LV, AS, FS exactly as defined in the paper |
+| `test_ranking.py` | ranking against a JD, embedding cache, deduplication, endpoints |
+| `test_feedback.py` | recruiter-feedback weight rule and its API |
+| `test_storage.py` | MongoDB helpers and feedback persistence |
+
+Tests never call Gemini or a real MongoDB: when `settings.py` detects `manage.py test`
+it clears `GEMINI_API_KEY` and the scoring switches and points MongoDB at an
+unreachable address, so results are identical on every machine.
+
+## Configuration (environment variables)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MONGODB_URI` | — | MongoDB Atlas connection string (required in production) |
+| `GEMINI_API_KEY` | — | Gemini extraction + embeddings; without it: regex + TF-IDF |
+| `RECRUITER_ALLOWED_EMAILS` / `RECRUITER_ALLOWED_DOMAINS` | — / placeholder domains | who may hold the recruiter role |
+| `SCORE_WEIGHT_SS` / `SCORE_WEIGHT_AS` | `0.6` / `0.4` | FS weights (paper §IV.E.2) |
+| `ADAPTIVE_WEIGHTS` | `0` | `1` = FS uses the learned recruiter-feedback weights |
+| `VS_EVIDENCE_MODE` | `first` | `any` = action verb near any mention counts (ablation) |
+| `GEMINI_EXTRACTION` | `1` | `0` = deterministic regex extraction only |
+| `GEMINI_MODEL_PRIMARY` / `_FALLBACK` / `GEMINI_EMBEDDING_MODEL` | see code | model names |
+| `GEMINI_TIMEOUT_SECONDS` | `15` | per Gemini request |

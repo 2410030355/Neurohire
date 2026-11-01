@@ -1,5 +1,19 @@
 import os
+import sys
 from pathlib import Path
+
+# `python manage.py test` — tests must never touch production services
+TESTING = len(sys.argv) > 1 and sys.argv[1] == 'test'
+if TESTING:
+    # Behaviour switches read from the environment: tests always use the
+    # paper defaults, whatever is set on this machine.
+    for _var in ('GEMINI_API_KEY', 'ADAPTIVE_WEIGHTS', 'VS_EVIDENCE_MODE', 'SCORE_WEIGHT_SS',
+                 'SCORE_WEIGHT_AS', 'LV_RAW_MIN', 'LV_RAW_MAX', 'GEMINI_EXTRACTION',
+                 'FEEDBACK_LEARNING_RATE', 'REDACTION_BLIND', 'GEMINI_EMBEDDING_TASK_TYPE'):
+        os.environ.pop(_var, None)
+    # Expected failures (unreachable DB, simulated errors) would flood the output
+    import logging
+    logging.disable(logging.CRITICAL)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -81,6 +95,13 @@ DATABASES = {
 # (Render dashboard in production, a local .env / shell export in development).
 MONGODB_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/')
 MONGODB_DB = os.environ.get('MONGODB_DB', 'neurohire')
+MONGODB_TIMEOUT_MS = int(os.environ.get('MONGODB_TIMEOUT_MS', '8000'))
+if TESTING:
+    # Never the real cluster: an unreachable address (tests mock MongoDB),
+    # or a dedicated test database if TEST_MONGODB_URI is set.
+    MONGODB_URI = os.environ.get('TEST_MONGODB_URI', 'mongodb://127.0.0.1:1/')
+    MONGODB_DB = 'neurohire_test'
+    MONGODB_TIMEOUT_MS = 300
 
 # ── Auth ──────────────────────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
