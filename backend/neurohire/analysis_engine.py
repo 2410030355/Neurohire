@@ -256,7 +256,8 @@ def get_similarity_details(resume_text: str, job_description_text: str) -> Dict:
     if vectors is not None:
         try:
             cos = float(cosine_similarity([vectors[0]], [vectors[1]])[0][0])
-            return {'score': similarity_to_score(cos), 'cosine': round(cos, 6), 'method': 'gemini'}
+            return {'score': similarity_to_score(cos), 'cosine': round(cos, 6), 'method': 'gemini',
+                    'resume_embedding': [float(x) for x in vectors[0]]}
         except Exception as e:
             logger.error(f"Error computing Gemini embedding similarity: {e}")
 
@@ -265,6 +266,79 @@ def get_similarity_details(resume_text: str, job_description_text: str) -> Dict:
     if cos is None:
         return {'score': None, 'cosine': None, 'method': 'none'}
     return {'score': similarity_to_score(cos), 'cosine': round(cos, 6), 'method': 'tfidf'}
+
+
+EMBED_BATCH_SIZE = 50        # texts per Gemini embed_content call
+SIMILARITY_TEXT_CAP = 6000   # characters per text sent for similarity
+
+
+def embedding_cache_key(text: str) -> str:
+    """Cache key: changes when the text, model or task type changes."""
+    import hashlib
+    payload = f"{GEMINI_EMBEDDING_MODEL}|{GEMINI_EMBEDDING_TASK_TYPE}|{(text or '').strip()[:SIMILARITY_TEXT_CAP]}"
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def get_similarity_batch(resume_texts: List[str], job_description_text: str,
+                         caches: Optional[List[Optional[dict]]] = None) -> Dict:
+    """
+    SS for many résumés against one JD (ranking). One representation for the
+    whole set — if any Gemini call fails, every candidate falls back to TF-IDF
+    so scores stay comparable.
+
+    caches: optional per-résumé {'key': ..., 'values': [...]} from MongoDB;
+    reused when the key matches, so stored candidates are embedded only once.
+    Returns {'scores', 'cosines', 'method', 'new_embeddings'} where
+    new_embeddings[i] is a cache dict to store (or None if nothing new).
+    """
+    n = len(resume_texts)
+    caches = caches or [None] * n
+    jd = (job_description_text or '').strip()[:SIMILARITY_TEXT_CAP]
+    texts = [(t or '').strip()[:SIMILARITY_TEXT_CAP] for t in resume_texts]
+    empty = {'scores': [None] * n, 'cosines': [None] * n, 'method': 'none', 'new_embeddings': [None] * n}
+    if not jd or n == 0:
+        return empty
+
+    keys = [embedding_cache_key(t) for t in texts]
+    vectors: List[Optional[np.ndarray]] = [None] * n
+    for i, c in enumerate(caches):
+        if c and c.get('key') == keys[i] and c.get('values'):
+            vectors[i] = np.asarray(c['values'], dtype=float)
+
+    todo = [i for i in range(n) if vectors[i] is None and texts[i]]
+    jd_vec, ok = None, _get_gemini_client() is not None
+    if ok:
+        batch_texts = [jd] + [texts[i] for i in todo]
+        got: List[np.ndarray] = []
+        for start in range(0, len(batch_texts), EMBED_BATCH_SIZE):
+            chunk = _get_gemini_embeddings(batch_texts[start:start + EMBED_BATCH_SIZE])
+            if chunk is None:
+                ok = False
+                break
+            got.extend(chunk)
+        if ok:
+            jd_vec = got[0]
+            for i, vec in zip(todo, got[1:]):
+                vectors[i] = vec
+
+    if ok and jd_vec is not None:
+        scores, cosines, new = [], [], []
+        for i in range(n):
+            if vectors[i] is None:
+                scores.append(None); cosines.append(None); new.append(None)
+                continue
+            cos = float(cosine_similarity([vectors[i]], [jd_vec])[0][0])
+            scores.append(similarity_to_score(cos)); cosines.append(round(cos, 6))
+            new.append({'key': keys[i], 'values': [float(x) for x in vectors[i]]} if i in todo else None)
+        return {'scores': scores, 'cosines': cosines, 'method': 'gemini', 'new_embeddings': new}
+
+    logger.info("Gemini embeddings unavailable for ranking — TF-IDF fallback for every candidate.")
+    scores, cosines = [], []
+    for t in texts:
+        cos = _tfidf_cosine(t, jd) if t else None
+        cosines.append(None if cos is None else round(cos, 6))
+        scores.append(None if cos is None else similarity_to_score(cos))
+    return {'scores': scores, 'cosines': cosines, 'method': 'tfidf', 'new_embeddings': [None] * n}
 
 
 def get_similarity_score(resume_text: str, job_description_text: str) -> float:
@@ -712,6 +786,12 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
             "explainability": explainability,
 
             "extraction_method": extraction_method,
+
+            # For re-ranking against other job descriptions (stored, never shown)
+            "resume_text_redacted": redacted_text,
+            "embedding_cache": ({'key': embedding_cache_key(redacted_text),
+                                 'values': similarity['resume_embedding']}
+                                if similarity.get('resume_embedding') else None),
         }
 
     except FileNotFoundError:

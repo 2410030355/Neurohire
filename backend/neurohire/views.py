@@ -31,11 +31,16 @@ from .serializers import (
 )
 from .authentication import OriginCheckedSessionAuthentication
 from .access import is_allowed_recruiter_email, user_email, recruiter_signup_hint
-from .analysis_engine import analyze_resume, github_search_service, update_weights, get_current_weights
+from .analysis_engine import (
+    analyze_resume, github_search_service, update_weights, get_current_weights,
+    get_similarity_batch, extract_skills,
+)
+from .ranking import rank_candidates
 from .mongo_client import (
     mongo_insert_candidate, mongo_get_candidate,
     mongo_all_candidates, mongo_delete_all_candidates,
     mongo_find_by_github, mongo_is_available,
+    mongo_candidates_for_ranking, mongo_set_embedding_cache, mongo_save_ranking,
 )
 
 User = get_user_model()
@@ -362,6 +367,10 @@ class ResumeUploadView(APIView):
             'score_weights':          analysis.get('score_weights'),
             'final_fit':              analysis.get('final_fit', 'Medium'),
             'jd_skills':              analysis.get('jd_skills', []),
+            # Internal: lets /api/rank/ re-score this candidate against any JD.
+            # Excluded from every API response (mongo_client.INTERNAL_FIELDS).
+            'resume_text_redacted':   analysis.get('resume_text_redacted'),
+            'embedding_cache':        analysis.get('embedding_cache'),
             'explainability':         analysis.get('explainability', ''),
             'resume_strength_score':  (analysis.get('resume_strength_score') or 0),
             # Profile
@@ -382,11 +391,13 @@ class ResumeUploadView(APIView):
         }
         mongo_id = mongo_insert_candidate(mongo_doc)
 
+        public_analysis = {k: v for k, v in analysis.items()
+                           if k not in ('resume_text_redacted', 'embedding_cache')}
         return Response(
             {
                 'message': 'Analysis complete',
                 'candidate_id': mongo_id or 'local',
-                'analysis': analysis,
+                'analysis': public_analysis,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -588,6 +599,108 @@ class SeekerResumeView(APIView):
             'improvement_suggestions': improvement_tips,                  # was 'improvement_tips'
             'summary':               analysis.get('career_trajectory', ''), # was 'career_summary'
         }, status=status.HTTP_200_OK)
+
+
+# ==============================
+# Candidate Ranking API (paper §IV.E.3)
+# ==============================
+
+class RankCandidatesView(APIView):
+    """
+    POST /api/rank/
+      {
+        "job_description": "...",          required (min 20 characters)
+        "candidate_ids":   ["..."],        optional; default = all stored résumés
+        "top_k":           20,             optional; how many results to return
+        "components":      ["SS","CS","VS","LV"]   optional ablation
+      }
+    Recomputes SS against this JD for every candidate, normalises LV across
+    the candidates being ranked, combines into AS and FS, and orders by FS.
+    The run is stored (ranking_id) so recruiter decisions can refer to it.
+    """
+    parser_classes = [JSONParser]
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+
+    MAX_CANDIDATES = 200
+    VALID_COMPONENTS = {'SS', 'CS', 'VS', 'LV'}
+
+    def post(self, request):
+        data = request.data or {}
+        jd = (data.get('job_description') or '').strip()
+        if len(jd) < 20:
+            return Response({'error': 'job_description is required (at least 20 characters).'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        jd = jd[:10000]
+
+        components = data.get('components') or list(self.VALID_COMPONENTS)
+        if not isinstance(components, list) or not set(components) <= self.VALID_COMPONENTS or 'SS' not in components:
+            return Response({'error': 'components must be a subset of SS, CS, VS, LV that includes SS.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            top_k = int(data.get('top_k') or 50)
+        except (TypeError, ValueError):
+            return Response({'error': 'top_k must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+        top_k = max(1, min(top_k, self.MAX_CANDIDATES))
+
+        ids = data.get('candidate_ids')
+        if ids is not None and not isinstance(ids, list):
+            return Response({'error': 'candidate_ids must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not mongo_is_available():
+            return Response({'error': 'Candidate database unavailable.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        docs = mongo_candidates_for_ranking(ids=ids, limit=self.MAX_CANDIDATES)
+        if not docs:
+            return Response({'results': [], 'total_ranked': 0,
+                             'message': 'No stored résumés to rank. Upload résumés first.'})
+
+        candidates = [{
+            'id': d['id'], 'name': d.get('name'), 'text': d.get('resume_text_redacted'),
+            'skills': d.get('skills') or [], 'experience_years': d.get('experience_years'),
+            'consistency_score': d.get('consistency_score'),
+            'skill_validation_score': d.get('skill_validation_score'),
+            'lv_raw': d.get('lv_raw'), 'embedding_cache': d.get('embedding_cache'),
+        } for d in docs]
+
+        ranked = rank_candidates(candidates, jd, get_similarity_batch, extract_skills,
+                                 components=set(components))
+
+        for cand, cache in zip(candidates, ranked['new_embeddings']):
+            if cache:
+                mongo_set_embedding_cache(cand['id'], cache)
+
+        by_id = {d['id']: d for d in docs}
+        results = []
+        for r in ranked['results'][:top_k]:
+            d = by_id.get(r['candidate_id'], {})
+            results.append({**r, 'email': d.get('email'), 'education': d.get('education'),
+                            'consistency_flags': d.get('consistency_flags', []),
+                            'validated_skills': d.get('validated_skills', []),
+                            'skills': d.get('skills', [])})
+
+        ranking_id = mongo_save_ranking({
+            'job_description': jd,
+            'created_by': request.user.pk,
+            'method': ranked['method'],
+            'weights': ranked['weights'],
+            'components': ranked['components'],
+            'lv_bounds': ranked['lv_bounds'],
+            'results': [{k: r[k] for k in ('candidate_id', 'rank', 'semantic_score', 'consistency_score',
+                                           'skill_validation_score', 'lv_score', 'analytical_score',
+                                           'final_score', 'final_fit')}
+                        for r in ranked['results']],
+        })
+
+        return Response({
+            'ranking_id': ranking_id,
+            'total_ranked': len(ranked['results']),
+            'similarity_method': ranked['method'],
+            'weights': ranked['weights'],
+            'components': ranked['components'],
+            'lv_bounds': ranked['lv_bounds'],
+            'jd_skills': ranked['jd_skills'],
+            'results': results,
+        })
 
 
 # ==============================
@@ -1923,6 +2036,13 @@ def _get_follow_ups(role, intent):
     table = FOLLOW_UPS_SEEKER if role == 'jobseeker' else FOLLOW_UPS_RECRUITER
     return table.get(intent, table['general'])
 
+def _get_db():
+    """MongoDB handle for the chatbot (was called but never imported, so the
+    chatbot silently ran without history or candidate data)."""
+    from .mongo_client import _get_db as _mongo_db
+    return _mongo_db()
+
+
 def _get_session_id(request):
     """Get or create a session ID for this user."""
     if not request.session.session_key:
@@ -2020,12 +2140,13 @@ def _build_candidate_pipeline(q):
 
     pipeline = [
         {'$match': pipeline_match},
-        {'$sort': {'role_match_score': -1}},
+        {'$sort': {'final_score': -1, 'role_match_score': -1}},
         {'$limit': 5},
         {'$project': {
             '_id': 0,
             'name': 1,
             'role_match_score': 1,
+            'final_score': 1,
             'final_fit': 1,
             'skills': {'$slice': ['$skills', 4]},
             'experience_years': 1,
@@ -2045,7 +2166,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
             NL = '\n'
             if any(w in q for w in ['how many','count','total','number','stats','summary']):
                 pipeline = [
-                    {'$group': {'_id': '$final_fit','count': {'$sum': 1},'avg_score': {'$avg': '$role_match_score'}}},
+                    {'$group': {'_id': '$final_fit','count': {'$sum': 1},'avg_score': {'$avg': '$final_score'}}},
                     {'$sort': {'count': -1}},
                 ]
                 rows = list(db.candidates.aggregate(pipeline))
@@ -2053,7 +2174,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                     return 'No candidates yet. Upload resumes to get started.', 'candidates'
                 total = sum(r['count'] for r in rows)
                 parts = ['- %s fit: %d candidates (avg %.0f%% match)' % (r['_id'] or 'Unknown', r['count'], r.get('avg_score') or 0) for r in rows]
-                return ('**%d candidates** in the system:' % total) + NL + NL.join(parts), 'candidates'
+                return ('**%d candidates** in the system (avg = final score):' % total) + NL + NL.join(parts), 'candidates'
 
             pipeline, skill, exp = _build_candidate_pipeline(q)
             has_filter = bool(skill or exp or any(w in q for w in ['high fit','medium fit','low fit','github','upload']))
@@ -2068,21 +2189,21 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                 for c in rows:
                     sp  = ', '.join((c.get('skills') or [])[:3]) or 'N/A'
                     ev  = '%.0fyr' % c.get('experience_years',0) if c.get('experience_years') else ''
-                    parts.append('- **%s** - %s fit (%.0f%%) %s%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('role_match_score',0), ev, NL, sp))
+                    parts.append('- **%s** - %s fit (FS %.0f) %s%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('final_score') or c.get('role_match_score') or 0, ev, NL, sp))
                 fd2 = []
                 if skill: fd2.append('**%s**' % skill)
                 if exp:   fd2.append('**%d+ years**' % exp)
                 hdr = ('Candidates with %s:' % ' & '.join(fd2) + NL) if fd2 else ('Filtered candidates:' + NL)
                 return hdr + NL.join(parts), 'candidates'
 
-            rows = list(db.candidates.find({},{'name':1,'role_match_score':1,'final_fit':1,'skills':1,'experience_years':1,'_id':0}).sort('role_match_score',-1).limit(5))
+            rows = list(db.candidates.find({},{'name':1,'role_match_score':1,'final_score':1,'final_fit':1,'skills':1,'experience_years':1,'_id':0}).sort([('final_score',-1),('role_match_score',-1)]).limit(5))
             if not rows:
                 return 'No candidates analyzed yet. Upload resumes in the Resume Analysis tab.', 'candidates'
             parts = []
             for c in rows:
                 sp = ', '.join((c.get('skills') or [])[:3]) or 'N/A'
-                parts.append('- **%s** - %s fit (%.0f%%)%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('role_match_score',0), NL, sp))
-            return '**Top candidates by role match:**' + NL + NL.join(parts), 'candidates'
+                parts.append('- **%s** - %s fit (FS %.0f)%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('final_score') or c.get('role_match_score') or 0, NL, sp))
+            return '**Top candidates by final score (FS):**' + NL + NL.join(parts), 'candidates'
         except Exception as e:
             return 'Could not fetch candidates. Error: %s' % str(e)[:80], 'candidates'
 
@@ -2101,8 +2222,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                     'Checks:' + NL +
                     '- Senior skills + under 1.5yr experience' + NL +
                     '- Too many skills for experience level' + NL +
-                    '- Advanced tools without foundational skills' + NL +
-                    '- High experience but very few skills'), 'analytics'
+                    '- Advanced tools without foundational skills'), 'analytics'
         if 'svc' in q:
             return ('**SVC - Skill Validation Coverage**' + NL +
                     'Percentage of candidates with project-backed skills.' + NL + NL +
@@ -2133,27 +2253,28 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
 
     if intent == 'platform':
         if any(w in q for w in ['skill valid','verify skill','validation']):
-            return ('**Evidence-Backed Skill Validation**' + NL +
-                    'Scans 120-char window around each skill.' + NL + NL +
-                    '- **Valid** = action verb found (built, deployed, implemented)' + NL +
-                    '- **Partial** = skill appears multiple times, no action verb' + NL +
-                    '- **Unverified** = just listed, no evidence' + NL + NL +
-                    'Prevents keyword stuffing from inflating scores.'), 'platform'
+            return ('**Skill Validation Score (VS)**' + NL +
+                    'Looks 60 characters either side of the first mention of each skill.' + NL + NL +
+                    '- **Valid** = an action verb is there (built, developed, deployed, led...)' + NL +
+                    '- **Partial** = no verb, but the skill is mentioned 2+ times' + NL +
+                    '- **Unverified** = mentioned once with no verb' + NL + NL +
+                    'VS = Valid skills / all skills x 100. It measures textual evidence, '
+                    'not proficiency.'), 'platform'
         if any(w in q for w in ['score','match','role match','fit score']):
-            return ('**Role Match Scoring**' + NL +
-                    'TF-IDF cosine similarity between resume and job description.' + NL + NL +
-                    '- High fit = 70%+' + NL +
-                    '- Medium fit = 40-69%' + NL +
-                    '- Low fit = below 40%' + NL + NL +
-                    'Paste a full JD for richer 200-feature bigram matching.'), 'platform'
+            return ('**How candidates are scored**' + NL +
+                    '- **SS** semantic similarity = cosine of Gemini embeddings of resume and JD (TF-IDF if Gemini is unavailable) x 100' + NL +
+                    '- **AS** analytical score = mean of Consistency, Skill validation and Learning velocity' + NL +
+                    '- **FS** final score = 0.6 x SS + 0.4 x AS' + NL + NL +
+                    'Fit: High = FS 70+, Medium = 40-69, Low = below 40.' + NL +
+                    'Names and contact details are removed before similarity is computed.'), 'platform'
         if 'consistency' in q:
             return ('**Consistency Scoring**' + NL +
                     'Starts at 100, deducts for contradictions:' + NL + NL +
                     '- Senior skills + under 1.5yr exp = -20 pts' + NL +
                     '- Too many skills for experience = -12 pts' + NL +
-                    '- Advanced tools without foundations = -15 pts' + NL +
-                    '- High exp but very few skills = -18 pts' + NL + NL +
-                    'Score never drops below 30.'), 'platform'
+                    '- Advanced tools without foundations = -15 pts' + NL + NL +
+                    'Deductions add up (lowest possible score is 53). Rules that need '
+                    'experience are skipped when the resume gives none.'), 'platform'
         if any(w in q for w in ['upload','pdf','docx','file']):
             return ('**Resume Upload**' + NL +
                     'Supports PDF and DOCX.' + NL + NL +
@@ -2175,8 +2296,8 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
             return ('**Talent Search (GitHub)**' + NL +
                     'Searches GitHub profiles by role keyword.' + NL + NL +
                     '- Fetches real GitHub users via GitHub API' + NL +
-                    '- Runs same NLP analysis pipeline' + NL +
-                    '- Returns skill validation, consistency, and role fit' + NL +
+                    '- Profile score from repos, followers and languages' + NL +
+                    '- Optional enrichment, separate from resume scoring' + NL +
                     '- Stored in MongoDB candidates collection'), 'platform'
         if any(w in q for w in ['mock','interview practice']):
             return ('**Mock Interview**' + NL +
@@ -2186,12 +2307,11 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                     '- Tracks speaking pace' + NL +
                     '- Gives improvement tips per answer'), 'platform'
         if any(w in q for w in ['learning velocity','velocity']):
-            return ('**Learning Velocity**' + NL +
-                    'Measures growth language in the resume.' + NL + NL +
-                    'High velocity = built, launched, led, scaled, promoted' + NL + NL +
-                    '- High = 4+ growth indicators' + NL +
-                    '- Medium = 2-3' + NL +
-                    '- Low = 0-1'), 'platform'
+            return ('**Learning Velocity (LV)**' + NL +
+                    'New skills that appear in later jobs, per year of dated work history.' + NL + NL +
+                    '- Needs at least 2 dated positions that mention skills (otherwise N/A)' + NL +
+                    '- Normalised 0-100 across the candidates being compared' + NL +
+                    '- High = 67+, Medium = 33-66, Low = below 33'), 'platform'
         return ('**NeuroHire Platform**' + NL + NL +
                 'Recruiter module:' + NL +
                 '- Resume Analysis with AI scoring' + NL +
@@ -2215,7 +2335,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
         if any(w in q for w in ['readiness', 'how is my score']):
             return ('**Readiness Score**' + NL +
                     'Combines two things equally:' + NL + NL +
-                    '- 50% Role Match - how well your resume matches the target role (TF-IDF similarity)' + NL +
+                    '- 50% Role Match - semantic similarity between your resume and the target role' + NL +
                     '- 50% Resume Strength - skills, education, and experience depth' + NL + NL +
                     'Improve either side to raise your overall readiness.'), 'seeker'
         if any(w in q for w in ['mock', 'interview']):
@@ -2276,8 +2396,10 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
 
 
 class ChatbotView(APIView):
-    permission_classes = []
-    authentication_classes = []
+    permission_classes = [AllowAny]
+    # Session auth so the server knows who is asking; candidate data is only
+    # answered for verified recruiters, whatever 'role' the browser sends.
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def get(self, request):
         """Return conversation history for this session from MongoDB."""
@@ -2295,9 +2417,8 @@ class ChatbotView(APIView):
         """Process a chat message, save to MongoDB, return reply + role-aware follow-ups."""
         try:
             message = (request.data.get('message') or '').strip()[:500]
-            role    = (request.data.get('role') or 'recruiter').strip().lower()
-            if role not in ('recruiter', 'jobseeker'):
-                role = 'recruiter'
+            # Recruiter answers (candidate data) only for verified recruiters.
+            role = 'recruiter' if IsRecruiter().has_permission(request, self) else 'jobseeker'
             if not message:
                 return Response({'error': 'Message required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2358,7 +2479,7 @@ class ChatbotView(APIView):
             return Response({
                 'reply': "Something went wrong. Please try again.",
                 'intent': 'general',
-                'follow_ups': FOLLOW_UPS['general'],
+                'follow_ups': _get_follow_ups('jobseeker', 'general'),
             }, status=status.HTTP_200_OK)
 
 

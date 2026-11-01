@@ -24,6 +24,7 @@ from neurohire.views import (
     LogoutView,
     ProfileUpdateView,
     ChatbotView,
+    RankCandidatesView,
 )
 router = DefaultRouter()
 router.register(r"candidates", CandidateViewSet, basename="candidates")
@@ -52,5 +53,6 @@ urlpatterns = [
     path("api/upload-file/", csrf_exempt(ResumeUploadView.as_view())),
     path("api/auth/profile/", csrf_exempt(ProfileUpdateView.as_view())),
     path("api/chatbot/", csrf_exempt(ChatbotView.as_view())),
+    path("api/rank/", RankCandidatesView.as_view()),
     path("auth/", include("social_django.urls", namespace="social")),
 ]
