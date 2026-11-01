@@ -438,6 +438,7 @@ class ResumeUploadView(APIView):
             # Profile
             'skills':                 analysis.get('skills', []),
             'validated_skills':       analysis.get('validated_skills', []),
+            'validated_skills_evidence': analysis.get('validated_skills_evidence', []),
             'missing_skills':         analysis.get('missing_skills', []),
             'experience_years':       analysis.get('experience_years'),
             'experience_years_dated':   analysis.get('experience_years_dated'),
@@ -672,6 +673,7 @@ class RankCandidatesView(APIView):
     POST /api/rank/
       {
         "job_description": "...",          required (min 20 characters)
+        "vs_variant":      "paper" | "jd"  optional; 'jd' = JD-conditioned evidence
         "candidate_ids":   ["..."],        optional; default = all stored résumés
         "top_k":           20,             optional; how many results to return
         "components":      ["SS","CS","VS","LV"]   optional ablation
@@ -705,6 +707,10 @@ class RankCandidatesView(APIView):
             return Response({'error': 'top_k must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
         top_k = max(1, min(top_k, self.MAX_CANDIDATES))
 
+        vs_variant = data.get('vs_variant') or 'paper'
+        if vs_variant not in ('paper', 'jd'):
+            return Response({'error': "vs_variant must be 'paper' or 'jd'."}, status=status.HTTP_400_BAD_REQUEST)
+
         ids = data.get('candidate_ids')
         if ids is not None and not isinstance(ids, list):
             return Response({'error': 'candidate_ids must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -721,13 +727,14 @@ class RankCandidatesView(APIView):
             'skills': d.get('skills') or [], 'experience_years': d.get('experience_years'),
             'consistency_score': d.get('consistency_score'),
             'skill_validation_score': d.get('skill_validation_score'),
+            'validated_skills_evidence': d.get('validated_skills_evidence') or [],
             'lv_raw': d.get('lv_raw'), 'embedding_cache': d.get('embedding_cache'),
         } for d in docs]
 
         weights = feedback.get_scoring_weights()
         ranked = rank_candidates(candidates, jd, get_similarity_batch, extract_skills,
                                  w_ss=weights['w_ss'], w_as=weights['w_as'],
-                                 components=set(components))
+                                 components=set(components), vs_variant=vs_variant)
 
         for cand, cache in zip(candidates, ranked['new_embeddings']):
             if cache:
@@ -748,6 +755,7 @@ class RankCandidatesView(APIView):
             'method': ranked['method'],
             'weights': ranked['weights'],
             'components': ranked['components'],
+            'vs_variant': vs_variant,
             'lv_bounds': ranked['lv_bounds'],
             'results': [{k: r[k] for k in ('candidate_id', 'rank', 'semantic_score', 'consistency_score',
                                            'skill_validation_score', 'lv_score', 'analytical_score',
@@ -762,6 +770,7 @@ class RankCandidatesView(APIView):
             'weights': ranked['weights'],
             'weights_source': weights['source'],
             'components': ranked['components'],
+            'vs_variant': vs_variant,
             'lv_bounds': ranked['lv_bounds'],
             'jd_skills': ranked['jd_skills'],
             'results': results,

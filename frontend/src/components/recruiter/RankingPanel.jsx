@@ -55,6 +55,7 @@ function DecisionButtons({ row, rankingId, decided, onDecided }) {
 export default function RankingPanel() {
   const [jd, setJd] = useState('');
   const [components, setComponents] = useState({ CS: true, VS: true, LV: true });
+  const [jdEvidence, setJdEvidence] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [open, setOpen] = useState(null);
@@ -76,6 +77,7 @@ export default function RankingPanel() {
         body: JSON.stringify({
           job_description: jd.trim(),
           components: ['SS', ...Object.keys(components).filter(k => components[k])],
+          vs_variant: jdEvidence ? 'jd' : 'paper',
           top_k: 100,
         }),
       });
@@ -126,6 +128,11 @@ export default function RankingPanel() {
                 {c.label}
               </label>
             ))}
+            <label className="flex items-center gap-1 cursor-pointer"
+              title="Skill validation counts only the JD's skills that the résumé backs with an action verb in the same sentence">
+              <input type="checkbox" checked={jdEvidence} onChange={e => setJdEvidence(e.target.checked)} />
+              JD-conditioned evidence
+            </label>
           </div>
           <Button onClick={rank} disabled={loading} className="gradient-bg text-white rounded-xl">
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ListOrdered className="w-4 h-4 mr-2" />}
@@ -154,6 +161,7 @@ export default function RankingPanel() {
                 FS = {result.weights?.SS}·SS + {result.weights?.AS}·AS ({result.weights_source || 'configured'} weights)
                 {' · '}SS: {METHOD_LABEL[result.similarity_method] || result.similarity_method}
                 {' · '}LV normalised over {result.lv_bounds?.n_with_lv ?? 0} candidates with dated history
+                {result.vs_variant === 'jd' ? ' · VS = JD-conditioned evidence' : ''}
               </p>
             </div>
             {result.similarity_method === 'tfidf' && (

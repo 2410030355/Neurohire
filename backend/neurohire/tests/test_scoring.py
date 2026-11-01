@@ -202,3 +202,41 @@ class AnalyzeResumeScoringTests(SimpleTestCase):
         self.assertIn('LV', r['missing_components'])
         self.assertEqual(r['analytical_components'], ['CS', 'VS'])
         self.assertEqual(len(r['consistency_rules_skipped']), 2)
+
+
+class EvidenceFixTests(SimpleTestCase):
+    """Verbs inside skill names are not evidence; skills lists are not sentences."""
+
+    def _status(self, text, skill, mode):
+        from neurohire.extraction import find_skill_spans
+        return sc.classify_skill_evidence(skill, find_skill_spans(text, skill), text, mode=mode)['status']
+
+    def test_skill_name_containing_a_verb_is_not_evidence(self):
+        text = "Skills: React, Responsive Design, Jest"
+        self.assertEqual(self._status(text, 'react', 'first'), 'Unverified')
+
+    def test_real_verb_still_counts_next_to_such_a_skill(self):
+        text = "Built responsive design system pages in React"
+        self.assertEqual(self._status(text, 'react', 'first'), 'Valid')
+
+    def test_list_lines_never_count_in_sentence_mode(self):
+        text = "SKILLS\nJava  •  React  •  Redux  •  Jest\nWORK\n• Designed Kafka pipelines"
+        self.assertEqual(self._status(text, 'react', 'sentence'), 'Unverified')
+        self.assertEqual(self._status(text, 'kafka', 'sentence'), 'Valid')
+
+    def test_sentence_mode_uses_any_mention(self):
+        text = ("Skills: React, Redux, Jest, CSS\n" + "Bengaluru, India. Open to relocation anywhere.\n"
+                "• Led the move of checkout to React and Redux")
+        self.assertEqual(self._status(text, 'react', 'sentence'), 'Valid')
+        self.assertEqual(self._status(text, 'react', 'first'), 'Partial')   # 2 mentions, no verb near the first
+
+    def test_is_list_line(self):
+        self.assertTrue(sc.is_list_line("React • TypeScript • Redux • Jest"))
+        self.assertTrue(sc.is_list_line("Java, Spring Boot, MySQL, Docker, Kafka"))
+        self.assertFalse(sc.is_list_line("• Built a dashboard in React, Redux and Jest for 2M users"))
+
+    def test_jd_conditioned_evidence(self):
+        validated = [{'skill': 'react', 'status': 'Valid'}, {'skill': 'jest', 'status': 'Partial'},
+                     {'skill': 'java', 'status': 'Valid'}]
+        self.assertEqual(sc.compute_jd_evidence(validated, ['react', 'jest', 'typescript', 'redux']), 25.0)
+        self.assertIsNone(sc.compute_jd_evidence(validated, []))

@@ -1,0 +1,1 @@
+We are hiring a Frontend Developer with strong experience in React or Vue.js, modern JavaScript/TypeScript, component-based architecture, state management (Redux, Vuex, or Pinia), REST or GraphQL API integration, and automated frontend testing (Jest or Cypress). Experience with responsive design, CSS frameworks, and CI/CD for frontend deployments is a plus.

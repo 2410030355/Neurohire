@@ -384,9 +384,9 @@ def compute_consistency_score(skills: List[str], experience_years: Optional[floa
     return compute_consistency(skills, experience_years)['score']
 
 
-def validate_skills_from_text(skills: List[str], text: str) -> List[dict]:
-    """Valid / Partial / Unverified per skill (paper §IV.D.2)."""
-    return [classify_skill_evidence(skill, find_skill_spans(text, skill), text) for skill in skills]
+def validate_skills_from_text(skills: List[str], text: str, mode: Optional[str] = None) -> List[dict]:
+    """Valid / Partial / Unverified per skill (paper §IV.D.2). mode: 'first' | 'any'."""
+    return [classify_skill_evidence(skill, find_skill_spans(text, skill), text, mode=mode) for skill in skills]
 
 
 def compute_skill_validation_score(validated_skills: List[dict]) -> Optional[float]:
@@ -512,6 +512,188 @@ def _build_explanation(scores, similarity, consistency, validated_skills, lv, ha
     return ' '.join(parts)
 
 
+def analyze_text(text_original: str, target_role: str = "", job_description: str = "",
+                 reference_date=None, redact: bool = True, compute_similarity: bool = True,
+                 use_gemini_extraction: bool = True, vs_mode: Optional[str] = None) -> Dict:
+    """
+    Full analysis of résumé text (everything analyze_resume does after reading
+    the file). Used directly by the evaluation scripts, e.g. to score
+    counterfactual copies of a résumé.
+
+    reference_date        'today' for "Present" end dates (default: actual today);
+                          fixed in evaluation runs so results are reproducible
+    redact                remove identifiers before similarity (False only for the
+                          fairness comparison)
+    compute_similarity    False skips SS (the evaluation computes it per method)
+    use_gemini_extraction False forces the deterministic regex/date path
+    vs_mode               'first' (paper) or 'any'; default from VS_EVIDENCE_MODE
+    """
+    if not text_original or not text_original.strip():
+        raise ValueError("Résumé text is empty")
+    # Drop annotation lines (e.g. the evaluation files' "Ground Truth Label")
+    # so they can never influence extraction or similarity.
+    text_original = strip_annotation_lines(text_original)
+
+    # ── Structured extraction (paper §IV.B) ─────────────────────────
+    # Deterministic regex/date parsing is the primary source for skills and
+    # experience (reproducible scores). Gemini, when configured, adds
+    # employment/projects structure and fills gaps; its skills are only
+    # kept if they are actually written in the résumé.
+    gemini_result = extract_with_gemini(text_original) if use_gemini_extraction else None
+    extraction_method = 'gemini+regex' if gemini_result else 'regex'
+    g = gemini_result or {}
+
+    name = g.get('name') or extract_name(text_original)
+    email = g.get('email') or extract_email(text_original)
+    phone = extract_phone(text_original)
+
+    skills, other_skills = merge_skills(
+        text_original, extract_skills(text_original), g.get('skills', []))
+
+    experience = extract_experience(text_original, today=reference_date)
+    employment_history = experience['positions']
+    experience_source = experience['source']
+    if experience['dated_years'] is None and g.get('employment'):
+        gemini_years = experience_from_positions(g['employment'], today=reference_date)
+        if gemini_years:
+            experience['dated_years'] = gemini_years
+            experience_source = 'dated (gemini)'
+        employment_history = g['employment']
+    claimed_years = experience['claimed_years'] or g.get('claimed_experience_years')
+    experience_years = experience['dated_years'] or claimed_years or 0.0
+    if not experience['dated_years']:
+        experience_source = 'claimed' if claimed_years else 'none'
+
+    education = extract_education(text_original)
+    if not education and g.get('education'):
+        education = extract_education(' '.join(str(e.get('degree') or '') for e in g['education'])) \
+            or (g['education'][0].get('degree') or None)
+    projects = g.get('projects', [])
+
+    # Text used for semantic similarity: name, contact details and
+    # personal attributes removed so they cannot influence the score.
+    redacted_text = redact_for_embedding(text_original, name=name) if redact else text_original.strip()
+    experience_known = experience_source != 'none'
+    years_for_rules = float(experience_years) if experience_known else None
+
+    # ── SS: semantic similarity (paper §IV.C) ───────────────────────
+    has_jd = bool(job_description and job_description.strip())
+    match_target = job_description.strip() if has_jd else (target_role or '').strip()
+    if compute_similarity:
+        similarity = get_similarity_details(redacted_text, match_target)
+    else:
+        similarity = {'score': None, 'cosine': None, 'method': 'none'}
+    ss = similarity['score']
+
+    # ── CS: consistency (paper §IV.D.1) ─────────────────────────────
+    consistency = compute_consistency(skills, years_for_rules)
+
+    # ── VS: skill validation (paper §IV.D.2) ────────────────────────
+    validated_skills = validate_skills_from_text(skills, text_original, mode=vs_mode)
+    # Line-bounded evidence for every skill: lets ranking compute the
+    # JD-conditioned evidence score (scoring.compute_jd_evidence) for any JD.
+    validated_skills_evidence = validate_skills_from_text(skills, text_original, mode='sentence')
+    vs = compute_skill_validation(validated_skills)
+
+    # ── LV: learning velocity (paper §IV.D.3) ───────────────────────
+    lv = compute_learning_velocity(text_original, experience['positions'])
+
+    # ── AS and FS (paper §IV.E) ─────────────────────────────────────
+    weights = feedback.get_scoring_weights()
+    scores = score_candidate(ss, consistency['score'], vs, lv['raw'],
+                             w_ss=weights['w_ss'], w_as=weights['w_as'])
+    learning_velocity = lv_label(scores['lv_score'])
+
+    resume_strength_score = compute_resume_strength_score(skills, education, experience_years)
+    career_trajectory = generate_career_trajectory(
+        skills, learning_velocity, experience_years if experience_known else None)
+
+    # Skills the JD asks for that the résumé does not mention
+    jd_skills = extract_skills(job_description) if has_jd else []
+    missing_skills = [s for s in jd_skills if s not in skills]
+
+    explainability = _build_explanation(scores, similarity, consistency, validated_skills, lv,
+                                        has_jd, experience_years if experience_known else None,
+                                        experience_source)
+
+    profile_summary = (
+        f"{name or 'Candidate'} - {education or 'Education not specified'} | "
+        f"{len(skills)} skills | "
+        + (f"{experience_years:.1f} years experience" if experience_known else "experience not dated")
+    )
+
+    logger.info(f"Successfully analyzed resume: {name or 'Unknown'} (extraction: {extraction_method})")
+
+    return {
+        # Basic Information
+        "name": name,
+        "email": email,
+        "phone": phone,
+
+        # Skills
+        "skills": skills,
+        "other_skills": other_skills,
+        "missing_skills": missing_skills,
+        "jd_skills": jd_skills,
+
+        # Experience and Education
+        "experience_years": experience_years if experience_known else None,
+        "experience_years_dated": experience['dated_years'],
+        "experience_years_claimed": claimed_years,
+        "experience_source": experience_source,
+        "employment_history": employment_history,
+        "projects": projects,
+        "education": education,
+
+        # SS (paper §IV.C). role_match_score kept: it is the field the UI reads.
+        "semantic_score": scores['semantic_score'],
+        "role_match_score": scores['semantic_score'],
+        "similarity_method": similarity['method'],
+        "similarity_cosine": similarity['cosine'],
+
+        # Analytical components (paper §IV.D)
+        "consistency_score": consistency['score'],
+        "consistency_flags": consistency['flags'],
+        "consistency_rules_skipped": consistency['rules_skipped'],
+        "skill_validation_score": vs,
+        "skill_evidence_band": evidence_band(vs),
+        "validated_skills": validated_skills,
+        "validated_skills_evidence": validated_skills_evidence,
+        "lv_raw": lv['raw'],
+        "lv_normalized": scores['lv_normalized'],
+        "lv_score": scores['lv_score'],
+        "lv_new_skills": lv['new_skills'],
+        "lv_span_years": lv['span_years'],
+        "lv_basis": lv['basis'],
+        "learning_velocity": learning_velocity,
+
+        # Aggregation (paper §IV.E): AS = mean(CS, VS, LV); FS = 0.6*SS + 0.4*AS
+        "analytical_score": scores['analytical_score'],
+        "analytical_components": scores['analytical_components'],
+        "missing_components": scores['missing_components'],
+        "final_score": scores['final_score'],
+        "score_weights": scores['weights'],
+        "final_fit": scores['final_fit'],
+
+        # Supplementary (not part of FS)
+        "resume_strength_score": resume_strength_score,
+
+        # Insights
+        "career_trajectory": career_trajectory,
+        "profile_summary": profile_summary,
+        "explainability": explainability,
+
+        "extraction_method": extraction_method,
+
+        # For re-ranking against other job descriptions (stored, never shown)
+        "resume_text_redacted": redacted_text,
+        "embedding_cache": ({'key': embedding_cache_key(redacted_text),
+                             'values': similarity['resume_embedding']}
+                            if similarity.get('resume_embedding') else None),
+    }
+
+
+
 def analyze_resume(file_path: str, target_role: str = "", job_description: str = "") -> Dict:
     """
     Main function to analyze a resume PDF/DOCX and extract comprehensive insights.
@@ -540,163 +722,8 @@ def analyze_resume(file_path: str, target_role: str = "", job_description: str =
     try:
         # Extract text (both lowercase and original case) — always needed,
         # regardless of extraction path, for scoring and phone lookup.
-        text_lower, text_original = extract_text_from_pdf(file_path)
-        # Drop annotation lines (e.g. the evaluation files' "Ground Truth Label")
-        # so they can never influence extraction or similarity.
-        text_original = strip_annotation_lines(text_original)
-        text_lower = text_original.lower()
-
-        # ── Structured extraction (paper §IV.B) ─────────────────────────
-        # Deterministic regex/date parsing is the primary source for skills and
-        # experience (reproducible scores). Gemini, when configured, adds
-        # employment/projects structure and fills gaps; its skills are only
-        # kept if they are actually written in the résumé.
-        gemini_result = extract_with_gemini(text_original)
-        extraction_method = 'gemini+regex' if gemini_result else 'regex'
-        g = gemini_result or {}
-
-        name = g.get('name') or extract_name(text_original)
-        email = g.get('email') or extract_email(text_original)
-        phone = extract_phone(text_original)
-
-        skills, other_skills = merge_skills(
-            text_original, extract_skills(text_original), g.get('skills', []))
-
-        experience = extract_experience(text_original)
-        employment_history = experience['positions']
-        experience_source = experience['source']
-        if experience['dated_years'] is None and g.get('employment'):
-            gemini_years = experience_from_positions(g['employment'])
-            if gemini_years:
-                experience['dated_years'] = gemini_years
-                experience_source = 'dated (gemini)'
-            employment_history = g['employment']
-        claimed_years = experience['claimed_years'] or g.get('claimed_experience_years')
-        experience_years = experience['dated_years'] or claimed_years or 0.0
-        if not experience['dated_years']:
-            experience_source = 'claimed' if claimed_years else 'none'
-
-        education = extract_education(text_original)
-        if not education and g.get('education'):
-            education = extract_education(' '.join(str(e.get('degree') or '') for e in g['education'])) \
-                or (g['education'][0].get('degree') or None)
-        projects = g.get('projects', [])
-
-        # Text used for semantic similarity: name, contact details and
-        # personal attributes removed so they cannot influence the score.
-        redacted_text = redact_for_embedding(text_original, name=name)
-        experience_known = experience_source != 'none'
-        years_for_rules = float(experience_years) if experience_known else None
-
-        # ── SS: semantic similarity (paper §IV.C) ───────────────────────
-        has_jd = bool(job_description and job_description.strip())
-        match_target = job_description.strip() if has_jd else (target_role or '').strip()
-        similarity = get_similarity_details(redacted_text, match_target)
-        ss = similarity['score']
-
-        # ── CS: consistency (paper §IV.D.1) ─────────────────────────────
-        consistency = compute_consistency(skills, years_for_rules)
-
-        # ── VS: skill validation (paper §IV.D.2) ────────────────────────
-        validated_skills = validate_skills_from_text(skills, text_original)
-        vs = compute_skill_validation(validated_skills)
-
-        # ── LV: learning velocity (paper §IV.D.3) ───────────────────────
-        lv = compute_learning_velocity(text_original, experience['positions'])
-
-        # ── AS and FS (paper §IV.E) ─────────────────────────────────────
-        weights = feedback.get_scoring_weights()
-        scores = score_candidate(ss, consistency['score'], vs, lv['raw'],
-                                 w_ss=weights['w_ss'], w_as=weights['w_as'])
-        learning_velocity = lv_label(scores['lv_score'])
-
-        resume_strength_score = compute_resume_strength_score(skills, education, experience_years)
-        career_trajectory = generate_career_trajectory(
-            skills, learning_velocity, experience_years if experience_known else None)
-
-        # Skills the JD asks for that the résumé does not mention
-        jd_skills = extract_skills(job_description) if has_jd else []
-        missing_skills = [s for s in jd_skills if s not in skills]
-
-        explainability = _build_explanation(scores, similarity, consistency, validated_skills, lv,
-                                            has_jd, experience_years if experience_known else None,
-                                            experience_source)
-
-        profile_summary = (
-            f"{name or 'Candidate'} - {education or 'Education not specified'} | "
-            f"{len(skills)} skills | "
-            + (f"{experience_years:.1f} years experience" if experience_known else "experience not dated")
-        )
-
-        logger.info(f"Successfully analyzed resume: {name or 'Unknown'} (extraction: {extraction_method})")
-
-        return {
-            # Basic Information
-            "name": name,
-            "email": email,
-            "phone": phone,
-
-            # Skills
-            "skills": skills,
-            "other_skills": other_skills,
-            "missing_skills": missing_skills,
-            "jd_skills": jd_skills,
-
-            # Experience and Education
-            "experience_years": experience_years if experience_known else None,
-            "experience_years_dated": experience['dated_years'],
-            "experience_years_claimed": claimed_years,
-            "experience_source": experience_source,
-            "employment_history": employment_history,
-            "projects": projects,
-            "education": education,
-
-            # SS (paper §IV.C). role_match_score kept: it is the field the UI reads.
-            "semantic_score": scores['semantic_score'],
-            "role_match_score": scores['semantic_score'],
-            "similarity_method": similarity['method'],
-            "similarity_cosine": similarity['cosine'],
-
-            # Analytical components (paper §IV.D)
-            "consistency_score": consistency['score'],
-            "consistency_flags": consistency['flags'],
-            "consistency_rules_skipped": consistency['rules_skipped'],
-            "skill_validation_score": vs,
-            "skill_evidence_band": evidence_band(vs),
-            "validated_skills": validated_skills,
-            "lv_raw": lv['raw'],
-            "lv_normalized": scores['lv_normalized'],
-            "lv_score": scores['lv_score'],
-            "lv_new_skills": lv['new_skills'],
-            "lv_span_years": lv['span_years'],
-            "lv_basis": lv['basis'],
-            "learning_velocity": learning_velocity,
-
-            # Aggregation (paper §IV.E): AS = mean(CS, VS, LV); FS = 0.6*SS + 0.4*AS
-            "analytical_score": scores['analytical_score'],
-            "analytical_components": scores['analytical_components'],
-            "missing_components": scores['missing_components'],
-            "final_score": scores['final_score'],
-            "score_weights": scores['weights'],
-            "final_fit": scores['final_fit'],
-
-            # Supplementary (not part of FS)
-            "resume_strength_score": resume_strength_score,
-
-            # Insights
-            "career_trajectory": career_trajectory,
-            "profile_summary": profile_summary,
-            "explainability": explainability,
-
-            "extraction_method": extraction_method,
-
-            # For re-ranking against other job descriptions (stored, never shown)
-            "resume_text_redacted": redacted_text,
-            "embedding_cache": ({'key': embedding_cache_key(redacted_text),
-                                 'values': similarity['resume_embedding']}
-                                if similarity.get('resume_embedding') else None),
-        }
-
+        _text_lower, text_original = extract_text_from_pdf(file_path)
+        return analyze_text(text_original, target_role, job_description)
     except FileNotFoundError:
         logger.error(f"File not found: {file_path}")
         raise

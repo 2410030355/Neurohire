@@ -42,9 +42,11 @@ LV_RAW_MIN_REF = _env_float('LV_RAW_MIN', 0.0)     # reference bounds used when 
 LV_RAW_MAX_REF = _env_float('LV_RAW_MAX', 4.0)     # candidate set is available
 LV_MIN_SPAN_YEARS = 0.5                            # Δt floor (avoids division blow-up)
 VS_WINDOW_CHARS = 60                               # characters each side of the mention
-# 'first' (paper §IV.D.2): only the first mention's window is checked.
-# 'any': a verb near ANY mention counts — a skills list at the top of the résumé
-#        then no longer hides evidence written further down (ablation option).
+# 'first'    (paper §IV.D.2): only the first mention's ±60-char window is checked.
+# 'any'      a verb near ANY mention counts — a skills list at the top of the
+#            résumé then no longer hides evidence written further down.
+# 'sentence' a verb in the same line/bullet as ANY mention (no window crossing
+#            into the next line); used by the JD-conditioned evidence score.
 VS_EVIDENCE_MODE = os.environ.get('VS_EVIDENCE_MODE', 'first').strip().lower()
 
 FIT_HIGH, FIT_MEDIUM = 70.0, 40.0                  # final-fit thresholds
@@ -147,6 +149,45 @@ ACTION_VERB_FORMS = {
 ACTION_VERB_RE = re.compile(r'\b(?:' + '|'.join(ACTION_VERB_FORMS.values()) + r')\b', re.IGNORECASE)
 
 
+_SKILL_NAME_VERB_RE = None
+
+
+def _skill_names_with_verbs() -> re.Pattern:
+    """
+    Skill names that contain a verb form ("responsive design", "system design",
+    "design system"). Those words name a skill, they are not evidence of doing
+    something, so they are masked before looking for action verbs.
+    """
+    global _SKILL_NAME_VERB_RE
+    if _SKILL_NAME_VERB_RE is None:
+        try:
+            from .extraction import SKILL_CATALOG
+            names = {a for aliases in SKILL_CATALOG.values() for a in aliases} | set(SKILL_CATALOG)
+        except Exception:
+            names = set()
+        names |= {'design system', 'design systems', 'system design', 'responsive design', 'ui design',
+                  'ux design', 'web design', 'database design'}
+        names = sorted((n for n in names if ACTION_VERB_RE.search(n)), key=len, reverse=True)
+        _SKILL_NAME_VERB_RE = re.compile('|'.join(re.escape(n) for n in names) or r'(?!x)x', re.IGNORECASE)
+    return _SKILL_NAME_VERB_RE
+
+
+_LIST_SEPARATOR_RE = re.compile(r'\s*(?:[•|·▪●,;]|\s-\s)\s*')
+
+
+def is_list_line(line: str) -> bool:
+    """A skills/tools list ("React • Redux • Jest", "Java, Spring, MySQL, Docker") —
+    enumerations, not sentences about work done."""
+    items = [x for x in _LIST_SEPARATOR_RE.split(line.strip(' •-*\t')) if x.strip()]
+    if len(items) < 4:
+        return False
+    return sum(len(x.split()) for x in items) / len(items) <= 3
+
+
+def _has_action_verb(window: str):
+    return ACTION_VERB_RE.search(_skill_names_with_verbs().sub(' ', window))
+
+
 def classify_skill_evidence(skill: str, spans: List[Tuple[int, int]], text: str,
                             mode: Optional[str] = None) -> Dict:
     """
@@ -158,11 +199,18 @@ def classify_skill_evidence(skill: str, spans: List[Tuple[int, int]], text: str,
     if not spans:
         return {'skill': skill, 'status': 'Unverified', 'mentions': 0, 'evidence': None}
     mode = (mode or VS_EVIDENCE_MODE)
-    candidates = spans if mode == 'any' else spans[:1]
+    candidates = spans[:1] if mode == 'first' else spans
     window, verb = '', None
     for start, end in candidates:
-        window = text[max(0, start - VS_WINDOW_CHARS):min(len(text), end + VS_WINDOW_CHARS)]
-        verb = ACTION_VERB_RE.search(window)
+        if mode == 'sentence':
+            line_start = text.rfind('\n', 0, start) + 1
+            line_end = text.find('\n', end)
+            window = text[line_start:line_end if line_end != -1 else len(text)]
+            if is_list_line(window):
+                continue
+        else:
+            window = text[max(0, start - VS_WINDOW_CHARS):min(len(text), end + VS_WINDOW_CHARS)]
+        verb = _has_action_verb(window)
         if verb:
             break
     if verb:
@@ -184,6 +232,21 @@ def compute_skill_validation(classified: List[Dict]) -> Optional[float]:
         return None
     v = sum(1 for c in classified if c['status'] == 'Valid')
     return round(v / n * 100.0, 2)
+
+
+def compute_jd_evidence(validated_sentence: List[Dict], jd_skills: Iterable[str]) -> Optional[float]:
+    """
+    JD-conditioned evidence (VS_JD, extension — not in the paper's §IV.D.2):
+    share of the skills the JOB DESCRIPTION asks for that the résumé backs with
+    an action verb in the same sentence/bullet. Listing a skill without saying
+    what was done with it earns nothing, so keyword stuffing does not help.
+    None when the JD names no catalogue skills.
+    """
+    jd = {s.lower() for s in jd_skills}
+    if not jd:
+        return None
+    valid = {v['skill'].lower() for v in validated_sentence if v.get('status') == 'Valid'}
+    return round(len(jd & valid) / len(jd) * 100.0, 2)
 
 
 def evidence_band(vs: Optional[float]) -> str:

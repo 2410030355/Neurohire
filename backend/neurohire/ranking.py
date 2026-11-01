@@ -22,13 +22,15 @@ def rank_candidates(candidates: List[Dict], job_description: str,
                     similarity_batch_fn: Callable[[List[str], str, List[Optional[dict]]], Dict],
                     extract_skills_fn: Optional[Callable[[str], List[str]]] = None,
                     w_ss: Optional[float] = None, w_as: Optional[float] = None,
-                    components: Optional[set] = None) -> Dict:
+                    components: Optional[set] = None, vs_variant: str = 'paper') -> Dict:
     """
     candidates: dicts with keys
         id, name, text (redacted résumé text), skills,
         consistency_score, skill_validation_score, lv_raw,
         embedding_cache (optional; passed through to similarity_batch_fn)
     components: which of {'SS','CS','VS','LV'} to use (ablation). Default all.
+    vs_variant: 'paper' = stored VS (§IV.D.2); 'jd' = JD-conditioned evidence
+                (scoring.compute_jd_evidence; needs validated_skills_evidence).
     Returns {'results': [...ranked...], 'method': str, 'lv_bounds': {...},
              'weights': {...}, 'new_embeddings': [...aligned with input...]}
     """
@@ -42,12 +44,19 @@ def rank_candidates(candidates: List[Dict], job_description: str,
     present = [v for v in lv_raw if v is not None]
 
     jd_skills = set(extract_skills_fn(job_description)) if extract_skills_fn else set()
+    if vs_variant == 'jd' and not extract_skills_fn:
+        raise ValueError("vs_variant='jd' needs extract_skills_fn")
 
     results = []
     for i, c in enumerate(candidates):
         ss = sim['scores'][i] if 'SS' in components else None
         cs = c.get('consistency_score') if 'CS' in components else None
-        vs = c.get('skill_validation_score') if 'VS' in components else None
+        if 'VS' not in components:
+            vs = None
+        elif vs_variant == 'jd':
+            vs = scoring.compute_jd_evidence(c.get('validated_skills_evidence') or [], jd_skills)
+        else:
+            vs = c.get('skill_validation_score')
         raw = lv_raw[i] if 'LV' in components else None
         norm = lv_norm[i] if 'LV' in components else None
         s = scoring.score_candidate(ss, cs, vs, raw, w_ss=w_ss, w_as=w_as, lv_norm=norm)
@@ -79,6 +88,7 @@ def rank_candidates(candidates: List[Dict], job_description: str,
         'weights': {'SS': scoring.W_SS if w_ss is None else w_ss,
                     'AS': scoring.W_AS if w_as is None else w_as},
         'components': sorted(components),
+        'vs_variant': vs_variant,
         'jd_skills': sorted(jd_skills),
         'new_embeddings': sim.get('new_embeddings', [None] * len(candidates)),
     }

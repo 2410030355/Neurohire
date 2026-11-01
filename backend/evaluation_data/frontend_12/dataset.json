@@ -1,0 +1,15 @@
+{
+  "name": "frontend_12",
+  "description": "12 constructed résumés (not real people) for one Frontend Developer role: 7 frontend (React/Vue) labelled relevant, 5 non-frontend (Java backend, Python data, PHP, Android, junior UI) labelled not relevant. Labels were assigned by the authors and are stored in each file's 'Ground Truth Label' line, which is removed before any scoring.",
+  "reference_date": "2023-06-30",
+  "reference_date_note": "Résumés use '<year> – Present'. With 'Present' = 2023-06-30, date-derived experience equals the total each résumé states, so the dates are interpreted as the authors intended.",
+  "jobs": [
+    {
+      "id": "frontend",
+      "title": "Frontend Developer",
+      "jd_file": "jd_frontend.txt",
+      "jd_note": "Written after the labels, to describe the role the labels encode (React/Vue frontend = relevant). Not an independently sourced job posting.",
+      "label_source": "authors (single annotator), from the Ground Truth Label lines"
+    }
+  ]
+}
