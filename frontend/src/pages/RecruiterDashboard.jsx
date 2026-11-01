@@ -11,6 +11,7 @@ import TalentSearch from '@/components/recruiter/TalentSearch';
 import ScheduledList from '@/components/recruiter/ScheduledList';
 import WaitlistPanel from '@/components/recruiter/WaitlistPanel';
 import AIAnalytics from '@/components/recruiter/AIAnalytics';
+import RankingPanel from '@/components/recruiter/RankingPanel';
 import ScheduleModal from '@/components/recruiter/ScheduleModal';
 import EmptyState from '@/components/shared/EmptyState';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton';
@@ -100,6 +101,20 @@ export default function RecruiterDashboard() {
                 ) : (
                   <EmptyState title="No analyzed candidates yet" />
                 )}
+              </>
+            )}
+
+            {activeTab === 'ranking' && (
+              <>
+                <div className="mb-8">
+                  <h1 className="text-2xl md:text-3xl font-bold mb-1" style={{ color: 'var(--nh-text)' }}>
+                    Rank Candidates for a Job
+                  </h1>
+                  <p className="text-sm" style={{ color: 'var(--nh-text-secondary)' }}>
+                    Every stored résumé scored against one job description and ordered by final score
+                  </p>
+                </div>
+                <RankingPanel />
               </>
             )}
 

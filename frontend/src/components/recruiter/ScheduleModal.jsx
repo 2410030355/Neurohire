@@ -26,7 +26,7 @@ export default function ScheduleModal({ candidate, onClose, onScheduled }) {
       await jsonFetch('/api/interviews/', {
         method: 'POST',
         body: JSON.stringify({
-          candidate_id: candidate.id,
+          candidate_id: candidate.mongo_id || candidate.candidate_id || candidate.id,
           candidate_name: candidate.name,
           role: candidate.target_role,
           scheduled_date: `${date}T${time}:00`,
@@ -36,11 +36,18 @@ export default function ScheduleModal({ candidate, onClose, onScheduled }) {
         }),
       });
 
-      if (candidate.id) {
-        await jsonFetch(`/api/candidates/${candidate.id}/`, {
-          method: 'PATCH',
-          body: JSON.stringify({ status: 'scheduled' }),
-        });
+      // Only stored (MongoDB) candidates have a status to update; search
+      // results don't. A failed status update must not hide the saved interview.
+      const storedId = candidate.mongo_id || candidate.candidate_id;
+      if (storedId) {
+        try {
+          await jsonFetch(`/api/candidates/${storedId}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'scheduled' }),
+          });
+        } catch (e) {
+          console.warn('Candidate status update failed:', e);
+        }
       }
 
       toast.success('Interview scheduled!');

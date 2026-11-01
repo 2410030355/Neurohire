@@ -322,3 +322,40 @@ class ChatbotRoleTests(TestCase):
         c.post('/api/chatbot/', json.dumps({'message': 'show top candidates'}),
                content_type='application/json', HTTP_ORIGIN=TRUSTED)
         self.assertEqual(reply.call_args[0][3], 'recruiter')
+
+
+@override_settings(CORS_ALLOWED_ORIGINS=[TRUSTED])
+class CandidateStatusTests(TestCase):
+    """PATCH /api/candidates/<id>/ used by the schedule modal (Task 5)."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.rec = User.objects.create_user('rec@company.com', 'rec@company.com', 'pw-12345678')
+        UserProfile.objects.create(user=self.rec, role='recruiter')
+        self.c = Client()
+        self.c.force_login(self.rec)
+
+    def _patch(self, body, cid='65f0c0ffee0000000000abcd'):
+        return self.c.patch(f'/api/candidates/{cid}/', json.dumps(body), content_type='application/json',
+                            HTTP_ORIGIN=TRUSTED)
+
+    @patch('neurohire.views.mongo_update_candidate_status', return_value=True)
+    def test_status_update(self, upd):
+        resp = self._patch({'status': 'scheduled'})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        upd.assert_called_once_with('65f0c0ffee0000000000abcd', 'scheduled')
+
+    @patch('neurohire.views.mongo_update_candidate_status', return_value=False)
+    def test_unknown_candidate(self, _upd):
+        self.assertEqual(self._patch({'status': 'scheduled'}).status_code, 404)
+
+    @patch('neurohire.views.mongo_update_candidate_status')
+    def test_only_known_statuses(self, upd):
+        self.assertEqual(self._patch({'status': 'deleted'}).status_code, 400)
+        self.assertEqual(self._patch({'final_score': 100}).status_code, 400)
+        upd.assert_not_called()
+
+    def test_recruiter_only(self):
+        resp = Client().patch('/api/candidates/x/', json.dumps({'status': 'scheduled'}),
+                              content_type='application/json', HTTP_ORIGIN=TRUSTED)
+        self.assertEqual(resp.status_code, 403)

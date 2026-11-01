@@ -267,3 +267,18 @@ def mongo_get_ranking(ranking_id: str) -> dict | None:
     except Exception as e:
         logger.error(f"mongo_get_ranking failed: {e}")
         return None
+
+
+def mongo_update_candidate_status(mongo_id: str, status_value: str) -> bool:
+    """Set a candidate's pipeline status. False if not found / not a MongoDB id."""
+    col = candidates_collection()
+    if col is None:
+        return False
+    try:
+        from bson import ObjectId
+        result = col.update_one({'_id': ObjectId(mongo_id)},
+                                {'$set': {'status': status_value, 'updated_at': datetime.utcnow()}})
+        return result.matched_count > 0
+    except Exception as e:
+        logger.error(f"mongo_update_candidate_status failed: {e}")
+        return False

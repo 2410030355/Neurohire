@@ -43,6 +43,7 @@ from .mongo_client import (
     mongo_all_candidates, mongo_delete_all_candidates,
     mongo_find_by_github, mongo_is_available,
     mongo_candidates_for_ranking, mongo_set_embedding_cache, mongo_save_ranking,
+    mongo_update_candidate_status,
 )
 
 User = get_user_model()
@@ -179,6 +180,18 @@ class CandidateViewSet(viewsets.ViewSet):
         if not candidate:
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(candidate)
+
+    CANDIDATE_STATUSES = {'new', 'analyzed', 'scheduled', 'waitlisted', 'hired', 'rejected'}
+
+    def partial_update(self, request, pk=None):
+        """PATCH /api/candidates/<id>/ {"status": "..."} — only the status can change."""
+        new_status = (request.data or {}).get('status')
+        if new_status not in self.CANDIDATE_STATUSES:
+            return Response({'error': f"status must be one of {sorted(self.CANDIDATE_STATUSES)}"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not mongo_update_candidate_status(pk, new_status):
+            return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'id': pk, 'status': new_status})
 
 
 class IsRecruiterOrReadOnly(BasePermission):

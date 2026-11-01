@@ -1,11 +1,12 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Brain, FileText, Search, Calendar, Clock, BarChart3, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Brain, FileText, Search, Calendar, Clock, BarChart3, LogOut, ChevronLeft, ChevronRight, ListOrdered } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 
 const menuItems = [
   { icon: FileText,  label: 'Resume Analysis', id: 'analysis'  },
+  { icon: ListOrdered, label: 'Rank for a Job', id: 'ranking'  },
   { icon: Search,    label: 'Talent Search',   id: 'talent'    },
   { icon: Calendar,  label: 'Scheduled',       id: 'scheduled' },
   { icon: Clock,     label: 'Waitlist',        id: 'waitlist'  },
