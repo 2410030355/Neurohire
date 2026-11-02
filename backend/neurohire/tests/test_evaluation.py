@@ -67,7 +67,8 @@ class MetricTests(SimpleTestCase):
         self.assertEqual(M.fleiss_kappa([[2, 0], [0, 2], [2, 0]]), 1.0)
 
 
-class DataTests(SimpleTestCase):
+class DatasetMixin:
+    """A 4-résumé dataset in a temp folder."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp()
@@ -91,6 +92,9 @@ class DataTests(SimpleTestCase):
         with open(os.path.join(self.dir, 'dataset.json'), 'w', encoding='utf-8') as f:
             json.dump({'name': 'mini', 'reference_date': '2023-06-30',
                        'jobs': [{'id': 'fe', 'title': 'Frontend Developer', 'jd_file': 'jd.txt'}]}, f)
+
+
+class DataTests(DatasetMixin, SimpleTestCase):
 
     def test_split_label(self):
         clean, label, note = split_label('Name\nGround Truth Label: 1 — Strong match\nMore')
@@ -170,3 +174,65 @@ class PerturbTests(SimpleTestCase):
 
     def test_eight_variants(self):
         self.assertEqual(len(identity_variants(self.CV)), 8)
+
+
+class GeminiPathTests(DatasetMixin, SimpleTestCase):
+    """The --similarity gemini path, with a simulated client (no network)."""
+
+    def _fake_client(self, fail_first=0):
+        import hashlib
+        from unittest.mock import MagicMock
+        import numpy as np
+        state = {'calls': 0, 'texts': 0}
+
+        def embed(model, contents, config=None):
+            state['calls'] += 1
+            if state['calls'] <= fail_first:
+                raise RuntimeError('429 rate limited')
+            vecs = []
+            for t in contents:
+                v = np.zeros(64)
+                for tok in t.lower().split():
+                    v[int(hashlib.md5(tok.encode()).hexdigest(), 16) % 64] += 1
+                vecs.append(MagicMock(values=list(v)))
+            state['texts'] += len(contents)
+            return MagicMock(embeddings=vecs)
+        client = MagicMock()
+        client.models.embed_content.side_effect = embed
+        return client, state
+
+    def test_full_run_uses_gemini_and_batches_calls(self):
+        from unittest.mock import patch
+        from neurohire import analysis_engine as ae
+        from neurohire.evaluation.runner import evaluate_job
+        client, state = self._fake_client()
+        ds = load_dataset(self.dir)
+        with patch.object(ae, '_get_gemini_client', return_value=client):
+            r = evaluate_job(ds, ds.jobs[0], 'gemini', k=2, n_boot=50, progress=lambda *_: None)
+        self.assertIn('Gemini embedding only', r['main'])
+        # 4 résumés, 2 stuffed copies, 32 + 32 identity variants, leakage: a handful of batched calls
+        self.assertLessEqual(state['calls'], 12)
+
+    def test_rate_limit_is_retried(self):
+        from unittest.mock import patch
+        from neurohire import analysis_engine as ae
+        from neurohire.evaluation.baselines import gemini_batch
+        client, state = self._fake_client(fail_first=2)
+        with patch.object(ae, '_get_gemini_client', return_value=client):
+            out = gemini_batch(['react dev'], 'react role', sleep=lambda s: None)
+        self.assertEqual(out['method'], 'gemini')
+        self.assertEqual(state['calls'], 3)
+
+    def test_persistent_failure_raises_instead_of_tfidf(self):
+        from unittest.mock import patch
+        from neurohire import analysis_engine as ae
+        from neurohire.evaluation.baselines import gemini_batch
+        client, _ = self._fake_client(fail_first=99)
+        with patch.object(ae, '_get_gemini_client', return_value=client):
+            with self.assertRaises(RuntimeError):
+                gemini_batch(['react dev'], 'react role', retries=3, sleep=lambda s: None)
+
+    def test_command_refuses_gemini_without_key(self):
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command('evaluate', dataset=self.dir, similarity='gemini', stdout=io.StringIO())

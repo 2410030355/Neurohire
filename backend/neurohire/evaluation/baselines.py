@@ -77,14 +77,31 @@ def tfidf_pair_batch(texts: List[str], jd: str, caches=None) -> Dict:
             'cosines': cos, 'method': 'tfidf', 'new_embeddings': [None] * len(texts)}
 
 
-def gemini_batch(texts: List[str], jd: str, caches=None) -> Dict:
-    """Gemini embeddings. Raises instead of silently falling back to TF-IDF."""
+GEMINI_RETRIES = 5          # attempts per batch (rate limits on free keys)
+GEMINI_BACKOFF_SECONDS = 4  # doubled after every failed attempt
+
+
+def gemini_batch(texts: List[str], jd: str, caches=None, retries: int = None, sleep=None) -> Dict:
+    """
+    Gemini embeddings via the app's get_similarity_batch. Retries with
+    exponential back-off (rate limits), and raises instead of silently falling
+    back to TF-IDF — a Gemini run must be Gemini for every candidate.
+    """
+    import time
     from neurohire.analysis_engine import get_similarity_batch
-    out = get_similarity_batch(texts, jd, caches)
-    if out['method'] != 'gemini':
-        raise RuntimeError('Gemini embeddings unavailable (check GEMINI_API_KEY / network). '
-                           'Run with --similarity tfidf or fix the key.')
-    return out
+    retries = GEMINI_RETRIES if retries is None else retries
+    sleep = sleep or time.sleep
+    wait = GEMINI_BACKOFF_SECONDS
+    for attempt in range(1, retries + 1):
+        out = get_similarity_batch(texts, jd, caches)
+        if out['method'] == 'gemini':
+            return out
+        if attempt < retries:
+            print(f'  Gemini call failed (attempt {attempt}/{retries}); retrying in {wait}s …', flush=True)
+            sleep(wait)
+            wait *= 2
+    raise RuntimeError('Gemini embeddings unavailable after retries (check GEMINI_API_KEY, quota, network). '
+                       'Nothing was written. Run with --similarity tfidf or fix the key.')
 
 
 SIMILARITY_BACKENDS: Dict[str, Callable] = {'tfidf': tfidf_pair_batch, 'gemini': gemini_batch}

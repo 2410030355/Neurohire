@@ -50,6 +50,10 @@ class MemoSimilarity:
     def __init__(self, backend: Callable):
         self.backend, self.memo, self.calls = backend, {}, 0
 
+    def prefetch(self, texts, jd):
+        """Score many texts in one backend call (fewer API requests)."""
+        self(list(texts), jd)
+
     def __call__(self, texts, jd, caches=None):
         key = lambda t: hashlib.sha256(f'{jd}\x00{t}'.encode()).hexdigest()
         missing = [t for t in dict.fromkeys(texts) if key(t) not in self.memo]
@@ -200,6 +204,7 @@ def stuffing_experiment(ids, labels, texts, pool, job, ref, sim, similarity, k, 
     negatives = [i for i, l in zip(ids, labels) if l <= 0]
     stuffed_texts = {f'{i}__stuffed': skill_stuff(texts[i], display_names(jd_skills)) for i in negatives}
     stuffed_pool = analyze_pool(stuffed_texts, job, ref, 'first', True, gemini_extraction)
+    sim.prefetch([a['resume_text_redacted'] for a in stuffed_pool.values()], job.jd)
     aug_ids = ids + list(stuffed_texts)
     aug_labels = labels + [0] * len(stuffed_texts)
     aug_pool = {**pool, **stuffed_pool}
@@ -243,12 +248,17 @@ def fairness_experiment(ids, texts, pool, job, ref, sim, redact, gemini_extracti
     base = nh_scores(to_candidates(base_pool), job.jd, sim, {'SS', 'CS', 'VS', 'LV'})
     deltas, rank_moves, by_group = [], [], {}
     per_candidate = {}
+    # Analyse every variant first and score their texts in one batch
+    variant_analyses = {
+        rid: {vname: analyze_text(vtext, job.title, job.jd, reference_date=ref, redact=redact,
+                                  compute_similarity=False, use_gemini_extraction=gemini_extraction)
+              for vname, vtext in identity_variants(texts[rid]).items()}
+        for rid in ids
+    }
+    sim.prefetch([va['resume_text_redacted'] for v in variant_analyses.values() for va in v.values()], job.jd)
     for rid in ids:
-        variants = identity_variants(texts[rid])
         cand_deltas = []
-        for vname, vtext in variants.items():
-            va = analyze_text(vtext, job.title, job.jd, reference_date=ref, redact=redact,
-                              compute_similarity=False, use_gemini_extraction=gemini_extraction)
+        for vname, va in variant_analyses[rid].items():
             swapped = dict(base_pool)
             swapped[rid] = va
             res = nh_scores(to_candidates(swapped), job.jd, sim, {'SS', 'CS', 'VS', 'LV'})
