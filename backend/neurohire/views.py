@@ -417,6 +417,9 @@ class ResumeUploadView(APIView):
             'consistency_score':      analysis.get('consistency_score'),
             'consistency_flags':      analysis.get('consistency_flags', []),
             'skill_validation_score': analysis.get('skill_validation_score'),
+            'skill_validation_score_original': analysis.get('skill_validation_score_original'),
+            'vs_definition':          analysis.get('vs_definition'),
+            'jd_skills_evidenced':    analysis.get('jd_skills_evidenced', []),
             'skill_evidence_band':    analysis.get('skill_evidence_band'),
             'lv_raw':                 analysis.get('lv_raw'),
             'lv_score':               analysis.get('lv_score'),
@@ -673,7 +676,8 @@ class RankCandidatesView(APIView):
     POST /api/rank/
       {
         "job_description": "...",          required (min 20 characters)
-        "vs_variant":      "paper" | "jd"  optional; 'jd' = JD-conditioned evidence
+        "vs_variant":      "jd" | "original"  optional; default 'jd' (JD-conditioned
+                                            evidence); 'original' = first formulation
         "candidate_ids":   ["..."],        optional; default = all stored résumés
         "top_k":           20,             optional; how many results to return
         "components":      ["SS","CS","VS","LV"]   optional ablation
@@ -707,9 +711,11 @@ class RankCandidatesView(APIView):
             return Response({'error': 'top_k must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
         top_k = max(1, min(top_k, self.MAX_CANDIDATES))
 
-        vs_variant = data.get('vs_variant') or 'paper'
-        if vs_variant not in ('paper', 'jd'):
-            return Response({'error': "vs_variant must be 'paper' or 'jd'."}, status=status.HTTP_400_BAD_REQUEST)
+        from . import scoring as _scoring
+        vs_variant = data.get('vs_variant') or _scoring.VS_DEFINITION
+        vs_variant = 'original' if vs_variant == 'paper' else vs_variant
+        if vs_variant not in ('jd', 'original'):
+            return Response({'error': "vs_variant must be 'jd' or 'original'."}, status=status.HTTP_400_BAD_REQUEST)
 
         ids = data.get('candidate_ids')
         if ids is not None and not isinstance(ids, list):
@@ -727,6 +733,8 @@ class RankCandidatesView(APIView):
             'skills': d.get('skills') or [], 'experience_years': d.get('experience_years'),
             'consistency_score': d.get('consistency_score'),
             'skill_validation_score': d.get('skill_validation_score'),
+            'skill_validation_score_original': d.get('skill_validation_score_original',
+                                                     d.get('skill_validation_score')),
             'validated_skills_evidence': d.get('validated_skills_evidence') or [],
             'lv_raw': d.get('lv_raw'), 'embedding_cache': d.get('embedding_cache'),
         } for d in docs]
@@ -2327,13 +2335,12 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
 
     if intent == 'platform':
         if any(w in q for w in ['skill valid','verify skill','validation']):
-            return ('**Skill Validation Score (VS)**' + NL +
-                    'Looks 60 characters either side of the first mention of each skill.' + NL + NL +
-                    '- **Valid** = an action verb is there (built, developed, deployed, led...)' + NL +
-                    '- **Partial** = no verb, but the skill is mentioned 2+ times' + NL +
-                    '- **Unverified** = mentioned once with no verb' + NL + NL +
-                    'VS = Valid skills / all skills x 100. It measures textual evidence, '
-                    'not proficiency.'), 'platform'
+            return ('**Skill Evidence Score (VS)**' + NL +
+                    'Of the skills the job description asks for, how many does the resume back '
+                    'with an action verb (built, developed, deployed, led...) in the same sentence?' + NL + NL +
+                    'VS = evidenced JD skills / JD skills x 100.' + NL +
+                    'A skills list alone earns nothing, so keyword stuffing does not help. '
+                    'It measures textual evidence, not proficiency.'), 'platform'
         if any(w in q for w in ['score','match','role match','fit score']):
             return ('**How candidates are scored**' + NL +
                     '- **SS** semantic similarity = cosine of Gemini embeddings of resume and JD (TF-IDF if Gemini is unavailable) x 100' + NL +

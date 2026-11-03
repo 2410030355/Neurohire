@@ -163,7 +163,7 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
           <ScoreRing score={safe.final}       size={56} label="Final (FS)"  />
           <ScoreRing score={safe.roleMatch}   size={48} label="Semantic"    color="var(--nh-primary)" />
           <ScoreRing score={safe.consistency} size={48} label="Consistency" color="var(--nh-success)" />
-          <ScoreRing score={safe.skills}      size={48} label="Skill Val."  color="var(--nh-warning)" />
+          <ScoreRing score={safe.skills}      size={48} label="Evidence"    color="var(--nh-warning)" />
           <ScoreRing score={safe.lv}          size={48} label="Learning V." color="#9b7ec8" />
         </div>
         <p className="text-[11px] mb-4" style={{ color: 'var(--nh-text-secondary)' }}>

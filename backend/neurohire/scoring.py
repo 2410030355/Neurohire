@@ -48,6 +48,15 @@ VS_WINDOW_CHARS = 60                               # characters each side of the
 # 'sentence' a verb in the same line/bullet as ANY mention (no window crossing
 #            into the next line); used by the JD-conditioned evidence score.
 VS_EVIDENCE_MODE = os.environ.get('VS_EVIDENCE_MODE', 'first').strip().lower()
+# Which VS feeds AS:
+#   'jd'        (default, revised method) job-description-conditioned evidence:
+#               share of the JD's skills backed by an action verb in the same
+#               sentence/bullet of the résumé (compute_jd_evidence)
+#   'original'  the first formulation: Valid / all detected skills, first-mention
+#               window (kept for the ablation "original formulation")
+VS_DEFINITION = os.environ.get('VS_DEFINITION', 'jd').strip().lower()
+if VS_DEFINITION == 'paper':
+    VS_DEFINITION = 'original'
 
 FIT_HIGH, FIT_MEDIUM = 70.0, 40.0                  # final-fit thresholds
 
@@ -81,14 +90,23 @@ CS_FOUNDATIONAL_SKILLS = {'python', 'javascript', 'java', 'git', 'sql', 'linux'}
 CS_FOUNDATION_PENALTY = 15
 
 
-def compute_consistency(skills: Sequence[str], experience_years: Optional[float]) -> Dict:
+def compute_consistency(skills: Sequence[str], experience_years: Optional[float],
+                        empty_not_applicable: bool = True) -> Dict:
     """
     CS_i = 100 − Σ_k d_ik over the three documented rules. Rules are
     independent and additive (all three can fire: minimum 53). No floor.
     Rules 1–2 need Y; when experience is unknown they are not evaluated.
+
+    Every rule is about the skills a résumé lists, so with NO recognised
+    skills no rule can be evaluated: CS is then not applicable (None), not a
+    vacuous 100. (empty_not_applicable=False reproduces the original
+    behaviour, used only for the "original formulation" ablation.)
     """
     s = {x.lower() for x in skills}
     flags, skipped = [], []
+    if not s and empty_not_applicable:
+        return {'score': None, 'flags': [], 'rules_skipped': ['all rules (no recognised skills)'],
+                'not_applicable': True}
     score = 100
 
     if experience_years is None:
@@ -120,7 +138,7 @@ def compute_consistency(skills: Sequence[str], experience_years: Optional[float]
                        f"(python, javascript, java, git, sql, linux).",
         })
 
-    return {'score': float(score), 'flags': flags, 'rules_skipped': skipped}
+    return {'score': float(score), 'flags': flags, 'rules_skipped': skipped, 'not_applicable': False}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -236,7 +254,7 @@ def compute_skill_validation(classified: List[Dict]) -> Optional[float]:
 
 def compute_jd_evidence(validated_sentence: List[Dict], jd_skills: Iterable[str]) -> Optional[float]:
     """
-    JD-conditioned evidence (VS_JD, extension — not in the paper's §IV.D.2):
+    JD-conditioned skill evidence — the VS used by the revised method:
     share of the skills the JOB DESCRIPTION asks for that the résumé backs with
     an action verb in the same sentence/bullet. Listing a skill without saying
     what was done with it earns nothing, so keyword stuffing does not help.

@@ -12,7 +12,7 @@ import { logDecision, fmt } from './decisions';
 
 const COMPONENTS = [
   { id: 'CS', label: 'Consistency' },
-  { id: 'VS', label: 'Skill validation' },
+  { id: 'VS', label: 'Skill evidence' },
   { id: 'LV', label: 'Learning velocity' },
 ];
 
@@ -55,7 +55,7 @@ function DecisionButtons({ row, rankingId, decided, onDecided }) {
 export default function RankingPanel() {
   const [jd, setJd] = useState('');
   const [components, setComponents] = useState({ CS: true, VS: true, LV: true });
-  const [jdEvidence, setJdEvidence] = useState(false);
+  const [originalVs, setOriginalVs] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [open, setOpen] = useState(null);
@@ -77,7 +77,7 @@ export default function RankingPanel() {
         body: JSON.stringify({
           job_description: jd.trim(),
           components: ['SS', ...Object.keys(components).filter(k => components[k])],
-          vs_variant: jdEvidence ? 'jd' : 'paper',
+          vs_variant: originalVs ? 'original' : 'jd',
           top_k: 100,
         }),
       });
@@ -129,9 +129,9 @@ export default function RankingPanel() {
               </label>
             ))}
             <label className="flex items-center gap-1 cursor-pointer"
-              title="Skill validation counts only the JD's skills that the résumé backs with an action verb in the same sentence">
-              <input type="checkbox" checked={jdEvidence} onChange={e => setJdEvidence(e.target.checked)} />
-              JD-conditioned evidence
+              title="Use the first formulation of VS (all listed skills, first-mention window) instead of job-description-conditioned evidence">
+              <input type="checkbox" checked={originalVs} onChange={e => setOriginalVs(e.target.checked)} />
+              Original VS (comparison)
             </label>
           </div>
           <Button onClick={rank} disabled={loading} className="gradient-bg text-white rounded-xl">
@@ -161,7 +161,7 @@ export default function RankingPanel() {
                 FS = {result.weights?.SS}·SS + {result.weights?.AS}·AS ({result.weights_source || 'configured'} weights)
                 {' · '}SS: {METHOD_LABEL[result.similarity_method] || result.similarity_method}
                 {' · '}LV normalised over {result.lv_bounds?.n_with_lv ?? 0} candidates with dated history
-                {result.vs_variant === 'jd' ? ' · VS = JD-conditioned evidence' : ''}
+                {result.vs_variant === 'original' ? ' · VS = original formulation' : ' · VS = JD-skill evidence'}
               </p>
             </div>
             {result.similarity_method === 'tfidf' && (

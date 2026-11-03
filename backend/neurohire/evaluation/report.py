@@ -69,11 +69,11 @@ def job_markdown(r: Dict, k: int) -> str:
 
     lines += ['### 3. FS weight sensitivity (full model)', '']
     rows = [[_f(w['w_ss'], 1), _f(w['w_as'], 1), _f(w['AP']), _f(w[f'NDCG@{k}']), _f(w['AUC']),
-             _f(w['E_AP']), _f(w[f'E_NDCG@{k}']), _f(w['E_AUC'])] for w in r['weights']]
-    lines += [_table(['w_SS', 'w_AS', 'AP', f'NDCG@{k}', 'AUC', 'AP (E)', f'NDCG@{k} (E)', 'AUC (E)'], rows), '',
-              '(E) = NeuroHire-E, JD-conditioned evidence in place of VS.', '']
+             _f(w['O_AP']), _f(w[f'O_NDCG@{k}']), _f(w['O_AUC'])] for w in r['weights']]
+    lines += [_table(['w_SS', 'w_AS', 'AP', f'NDCG@{k}', 'AUC', 'AP (orig.)', f'NDCG@{k} (orig.)', 'AUC (orig.)'],
+                     rows), '', '(orig.) = original formulation of VS and CS.', '']
 
-    lines += ['### 4. Skill-evidence rule: first mention (paper) vs any mention', '']
+    lines += ['### 4. Skill-evidence (VS) definition', '']
     rows = [[m, _f(e['mean_VS'], 1), _f(e['AP']), _f(e[f'NDCG@{k}']), _f(e['AUC'])] for m, e in r['evidence'].items()]
     lines += [_table(['VS rule', 'mean VS', 'AP', f'NDCG@{k}', 'AUC'], rows), '']
 
@@ -120,11 +120,11 @@ def job_markdown(r: Dict, k: int) -> str:
                   '(scores of every method, components, skills).', '']
         return '\n'.join(lines)
     rows = [[c['id'], c['label'], c['rank_full'], _f(c['FS'], 1), _f(c['SS'], 1), _f(c['CS'], 0), _f(c['VS'], 1),
-             _f(c['LV'], 1), _f(c['AS'], 1), _f(c['VS_JD'], 1), c['rank_E'], _f(c['FS_E'], 1),
+             _f(c['LV'], 1), _f(c['AS'], 1), _f(c['VS_original'], 1), c['rank_original'], _f(c['FS_original'], 1),
              _f(c['experience_dated'], 1), _f(c['experience_claimed'], 1), c['n_skills']]
             for c in sorted(r['per_candidate'], key=lambda c: c['rank_full'])]
-    lines += [_table(['Candidate', 'label', 'rank', 'FS', 'SS', 'CS', 'VS', 'LV', 'AS', 'VS_JD', 'rank (E)', 'FS (E)',
-                      'yrs (dates)', 'yrs (claimed)', '#skills'], rows), '']
+    lines += [_table(['Candidate', 'label', 'rank', 'FS', 'SS', 'CS', 'VS', 'LV', 'AS', 'VS (orig.)', 'rank (orig.)',
+                      'FS (orig.)', 'yrs (dates)', 'yrs (claimed)', '#skills'], rows), '']
     return '\n'.join(lines)
 
 

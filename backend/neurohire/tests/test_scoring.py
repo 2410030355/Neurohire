@@ -200,7 +200,10 @@ class AnalyzeResumeScoringTests(SimpleTestCase):
         self.assertIsNone(r['lv_score'])
         self.assertEqual(r['learning_velocity'], 'N/A')
         self.assertIn('LV', r['missing_components'])
-        self.assertEqual(r['analytical_components'], ['CS', 'VS'])
+        # target role "Frontend" names no catalogue skills → JD-conditioned VS not computable
+        self.assertIsNone(r['skill_validation_score'])
+        self.assertIsNotNone(r['skill_validation_score_original'])
+        self.assertEqual(r['analytical_components'], ['CS'])
         self.assertEqual(len(r['consistency_rules_skipped']), 2)
 
 
@@ -240,3 +243,52 @@ class EvidenceFixTests(SimpleTestCase):
                      {'skill': 'java', 'status': 'Valid'}]
         self.assertEqual(sc.compute_jd_evidence(validated, ['react', 'jest', 'typescript', 'redux']), 25.0)
         self.assertIsNone(sc.compute_jd_evidence(validated, []))
+
+
+
+class RevisedMethodTests(SimpleTestCase):
+
+    def test_cs_not_applicable_without_skills(self):
+        r = sc.compute_consistency([], 3.0)
+        self.assertIsNone(r['score'])
+        self.assertTrue(r['not_applicable'])
+        self.assertEqual(sc.compute_consistency([], 3.0, empty_not_applicable=False)['score'], 100.0)
+
+    def test_no_skills_no_longer_gets_perfect_as(self):
+        r = sc.score_candidate(ss=10, cs=None, vs=None, lv_raw=None)
+        self.assertIsNone(r['analytical_score'])
+        self.assertEqual(r['final_score'], 10.0)          # SS alone, not 0.6·10 + 0.4·100
+
+    @patch("neurohire.analysis_engine.extract_with_gemini", return_value=None)
+    @patch("neurohire.analysis_engine.get_similarity_details",
+           return_value={"score": 40.0, "cosine": 0.4, "method": "tfidf"})
+    def test_analysis_uses_jd_conditioned_vs(self, _s, _g):
+        from neurohire.analysis_engine import analyze_text
+        cv = ("Asha Rao\nSKILLS\nReact • Redux • Jest • Java\nEXPERIENCE\n"
+              "• Built the checkout UI in React\n• Developed Jest tests for the cart")
+        r = analyze_text(cv, 'Frontend', 'Frontend engineer: React, Redux, Jest, TypeScript')
+        self.assertEqual(r['vs_definition'], 'jd')
+        self.assertEqual(sorted(r['jd_skills_evidenced']), ['jest', 'react'])
+        self.assertEqual(r['skill_validation_score'], 50.0)            # 2 of 4 JD skills evidenced
+        self.assertIn('2 of 4 skills', r['explainability'])
+
+    @patch("neurohire.analysis_engine.extract_with_gemini", return_value=None)
+    @patch("neurohire.analysis_engine.get_similarity_details",
+           return_value={"score": 40.0, "cosine": 0.4, "method": "tfidf"})
+    def test_resume_without_skills(self, _s, _g):
+        from neurohire.analysis_engine import analyze_text
+        r = analyze_text("Ravi K\nManaged payroll and onboarding for 200 staff.", 'HR', 'Java developer: Java, Spring')
+        self.assertIsNone(r['consistency_score'])                     # no skills: CS not applicable
+        self.assertIn('not applicable', r['explainability'])
+        self.assertEqual(r['skill_validation_score'], 0.0)              # JD asks for Java; none evidenced
+        self.assertEqual(r['analytical_components'], ['VS'])
+        self.assertEqual(r['final_score'], round(0.6 * 40 + 0.4 * 0, 2))  # not 0.6·40 + 0.4·100
+
+    @patch("neurohire.analysis_engine.extract_with_gemini", return_value=None)
+    @patch("neurohire.analysis_engine.get_similarity_details",
+           return_value={"score": 40.0, "cosine": 0.4, "method": "tfidf"})
+    def test_no_jd_skills_means_vs_not_available(self, _s, _g):
+        from neurohire.analysis_engine import analyze_text
+        r = analyze_text("Asha\nSKILLS\nReact, Redux\n• Built React apps", 'Senior Engineer', '')
+        self.assertIsNone(r['skill_validation_score'])                  # role title names no skills
+        self.assertIn('names no recognised skills', r['explainability'])
