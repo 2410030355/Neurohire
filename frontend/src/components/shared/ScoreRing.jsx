@@ -8,14 +8,16 @@ export default function ScoreRing({
   label,
   color
 }) {
-  // 🛡️ clamp score safely
-  const safeScore = Math.max(0, Math.min(100, Number(score) || 0));
+  // null / undefined = not computable (shown as N/A, never as a fake 0)
+  const missing = score === null || score === undefined || Number.isNaN(Number(score));
+  const safeScore = missing ? 0 : Math.max(0, Math.min(100, Math.round(Number(score))));
 
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (safeScore / 100) * circumference;
 
   const getColor = () => {
+    if (missing) return 'var(--nh-border)';
     // ✅ explicit override (used by your CandidateCard)
     if (color) return color;
 
@@ -58,10 +60,10 @@ export default function ScoreRing({
         {/* center number */}
         <div className="absolute inset-0 flex items-center justify-center">
           <span
-            className="text-sm font-bold"
-            style={{ color: 'var(--nh-text)' }}
+            className={missing ? 'text-[10px] font-semibold' : 'text-sm font-bold'}
+            style={{ color: missing ? 'var(--nh-text-secondary)' : 'var(--nh-text)' }}
           >
-            {safeScore}
+            {missing ? 'N/A' : safeScore}
           </span>
         </div>
       </div>

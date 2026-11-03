@@ -34,7 +34,8 @@ def _get_db():
         mongo_uri = getattr(settings, 'MONGODB_URI', 'mongodb://localhost:27017/')
         db_name   = getattr(settings, 'MONGODB_DB',  'neurohire')
 
-        _client = MongoClient(mongo_uri, serverSelectionTimeoutMS=8000, connectTimeoutMS=8000)
+        timeout_ms = getattr(settings, 'MONGODB_TIMEOUT_MS', 8000)
+        _client = MongoClient(mongo_uri, serverSelectionTimeoutMS=timeout_ms, connectTimeoutMS=timeout_ms)
         # Ping to confirm connection
         _client.admin.command('ping')
         _db = _client[db_name]
@@ -56,17 +57,76 @@ def candidates_collection():
 
 # ── CRUD helpers ──────────────────────────────────────────────────────────
 
+# Fields stored for re-ranking that are never sent to the browser
+INTERNAL_FIELDS = ('resume_text_redacted', 'embedding_cache')
+_PUBLIC_PROJECTION = {f: 0 for f in INTERNAL_FIELDS}
+# List-valued fields that are unioned (not overwritten) when profiles merge
+_MERGE_LIST_FIELDS = ('skills', 'companies', 'other_skills')
+
+_email_index_ready = False
+
+
+def _ensure_email_index(col):
+    """Lazy, best-effort index so lookup by e-mail stays fast."""
+    global _email_index_ready
+    if _email_index_ready:
+        return
+    try:
+        col.create_index('email', sparse=True, background=True)
+        _email_index_ready = True
+    except Exception as e:
+        logger.warning(f"Could not create email index: {e}")
+
+
 def mongo_insert_candidate(data: dict) -> str | None:
     """
-    Insert a candidate profile document.
-    Adds created_at timestamp automatically.
-    Returns the inserted _id as string, or None on failure.
+    Insert a candidate profile, or MERGE into the existing profile with the
+    same e-mail (paper §III — one unified record per candidate).
+
+    On merge: list fields (skills, companies, other_skills) are unioned, the
+    sources the profile came from are accumulated, every other field takes the
+    new value (latest analysis wins), created_at is kept.
+    Returns the document _id as a string, or None on failure.
     """
     col = candidates_collection()
     if col is None:
         return None
     try:
-        doc = {**data, 'created_at': datetime.utcnow()}
+        now = datetime.utcnow()
+        doc = dict(data)
+        email = (doc.get('email') or '').strip().lower() or None
+        doc['email'] = email
+        source = doc.get('source')
+
+        existing = None
+        if email:
+            _ensure_email_index(col)
+            existing = col.find_one({'email': email})
+
+        if existing:
+            update = {k: v for k, v in doc.items() if k not in ('_id', 'created_at')}
+            for field in _MERGE_LIST_FIELDS:
+                old_vals = existing.get(field) or []
+                new_vals = doc.get(field) or []
+                if old_vals or new_vals:
+                    merged, seen = [], set()
+                    for v in list(old_vals) + list(new_vals):
+                        key = v.lower() if isinstance(v, str) else repr(v)
+                        if key not in seen:
+                            seen.add(key)
+                            merged.append(v)
+                    update[field] = merged
+            sources = list(existing.get('sources') or ([existing['source']] if existing.get('source') else []))
+            if source and source not in sources:
+                sources.append(source)
+            update['sources'] = sources
+            update['updated_at'] = now
+            col.update_one({'_id': existing['_id']}, {'$set': update})
+            return str(existing['_id'])
+
+        doc['sources'] = [source] if source else []
+        doc['created_at'] = now
+        doc['updated_at'] = now
         result = col.insert_one(doc)
         return str(result.inserted_id)
     except Exception as e:
@@ -81,7 +141,7 @@ def mongo_get_candidate(mongo_id: str) -> dict | None:
         return None
     try:
         from bson import ObjectId
-        doc = col.find_one({'_id': ObjectId(mongo_id)})
+        doc = col.find_one({'_id': ObjectId(mongo_id)}, _PUBLIC_PROJECTION)
         if doc:
             doc['mongo_id'] = str(doc.pop('_id'))
         return doc
@@ -111,7 +171,7 @@ def mongo_all_candidates(limit: int = 100) -> list:
     if col is None:
         return []
     try:
-        docs = list(col.find().sort('created_at', -1).limit(limit))
+        docs = list(col.find({}, _PUBLIC_PROJECTION).sort('created_at', -1).limit(limit))
         for doc in docs:
             doc['mongo_id'] = str(doc.pop('_id'))
         return docs
@@ -136,3 +196,90 @@ def mongo_delete_all_candidates() -> int:
 def mongo_is_available() -> bool:
     """Quick health check — returns True if MongoDB is reachable."""
     return _get_db() is not None
+
+# ── Ranking support ───────────────────────────────────────────────────────
+
+def mongo_candidates_for_ranking(ids: list | None = None, limit: int = 200) -> list:
+    """
+    Candidates that can be ranked against a JD: they need stored résumé text.
+    Returns full documents (including internal fields) with 'id' as a string.
+    """
+    col = candidates_collection()
+    if col is None:
+        return []
+    try:
+        query = {'resume_text_redacted': {'$exists': True, '$nin': [None, '']}}
+        if ids:
+            from bson import ObjectId
+            object_ids = []
+            for i in ids:
+                try:
+                    object_ids.append(ObjectId(str(i)))
+                except Exception:
+                    continue
+            query['_id'] = {'$in': object_ids}
+        docs = list(col.find(query).sort('created_at', -1).limit(limit))
+        for d in docs:
+            d['id'] = str(d.pop('_id'))
+        return docs
+    except Exception as e:
+        logger.error(f"mongo_candidates_for_ranking failed: {e}")
+        return []
+
+
+def mongo_set_embedding_cache(candidate_id: str, cache: dict) -> None:
+    col = candidates_collection()
+    if col is None or not cache:
+        return
+    try:
+        from bson import ObjectId
+        col.update_one({'_id': ObjectId(candidate_id)}, {'$set': {'embedding_cache': cache}})
+    except Exception as e:
+        logger.error(f"mongo_set_embedding_cache failed: {e}")
+
+
+def rankings_collection():
+    db = _get_db()
+    return None if db is None else db['rankings']
+
+
+def mongo_save_ranking(doc: dict) -> str | None:
+    """Store one ranking run (JD, weights, per-candidate components)."""
+    col = rankings_collection()
+    if col is None:
+        return None
+    try:
+        return str(col.insert_one({**doc, 'created_at': datetime.utcnow()}).inserted_id)
+    except Exception as e:
+        logger.error(f"mongo_save_ranking failed: {e}")
+        return None
+
+
+def mongo_get_ranking(ranking_id: str) -> dict | None:
+    col = rankings_collection()
+    if col is None:
+        return None
+    try:
+        from bson import ObjectId
+        doc = col.find_one({'_id': ObjectId(ranking_id)})
+        if doc:
+            doc['ranking_id'] = str(doc.pop('_id'))
+        return doc
+    except Exception as e:
+        logger.error(f"mongo_get_ranking failed: {e}")
+        return None
+
+
+def mongo_update_candidate_status(mongo_id: str, status_value: str) -> bool:
+    """Set a candidate's pipeline status. False if not found / not a MongoDB id."""
+    col = candidates_collection()
+    if col is None:
+        return False
+    try:
+        from bson import ObjectId
+        result = col.update_one({'_id': ObjectId(mongo_id)},
+                                {'$set': {'status': status_value, 'updated_at': datetime.utcnow()}})
+        return result.matched_count > 0
+    except Exception as e:
+        logger.error(f"mongo_update_candidate_status failed: {e}")
+        return False

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ChevronDown, ChevronUp, Calendar, Clock, User,
+  ChevronDown, ChevronUp, Calendar, Clock, User, XCircle,
   CheckCircle2, AlertTriangle, HelpCircle, Info,
   Briefcase, GraduationCap, ExternalLink, Award
 } from 'lucide-react';
@@ -12,27 +12,7 @@ import { toast } from 'sonner';
 import ScoreRing from '@/components/shared/ScoreRing';
 import FitBadge from '@/components/shared/FitBadge';
 
-// ── Log recruiter decision vs AI recommendation ───────────────────────────
-async function logDecision(candidate, recruiterDecision) {
-  try {
-    const fit = candidate?.final_fit || 'Low';
-    const aiRec = fit === 'High' ? 'hire' : fit === 'Medium' ? 'waitlist' : 'reject';
-    await jsonFetch('/api/ai-decision-logs/', {
-      method: 'POST',
-      body: JSON.stringify({
-        candidate: candidate?.id || null,
-        candidate_name: candidate?.name || 'Unknown',
-        ai_recommendation: aiRec,
-        recruiter_decision: recruiterDecision,
-        role_match_score: candidate?.role_match_score || 0,
-        consistency_score: candidate?.consistency_score || 0,
-        notes: `Portal: ${candidate?.portal_source || 'direct'} | Fit: ${fit}`,
-      }),
-    });
-  } catch (err) {
-    console.warn('Decision log failed:', err);
-  }
-}
+import { logDecision, projectText, fmt } from './decisions';
 
 // ── Skill Validation Badge ────────────────────────────────────────────────
 function SkillBadge({ skill, status }) {
@@ -53,7 +33,7 @@ function SkillBadge({ skill, status }) {
 
 // ── Consistency Flag ──────────────────────────────────────────────────────
 function ConsistencyFlag({ flag }) {
-  const isWarning = flag.type === 'warning';
+  const isWarning = flag.type === 'warning' || (flag.deduction || 0) > 0;
   return (
     <div className="flex items-start gap-2 p-2.5 rounded-xl text-xs"
       style={{
@@ -63,25 +43,31 @@ function ConsistencyFlag({ flag }) {
       {isWarning
         ? <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#c97d6f' }} />
         : <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: '#7C9EC9' }} />}
-      <span style={{ color: isWarning ? '#c97d6f' : '#7C9EC9' }}>{flag.message}</span>
+      <span style={{ color: isWarning ? '#c97d6f' : '#7C9EC9' }}>
+        {flag.message}{flag.deduction ? ` (−${flag.deduction})` : ''}
+      </span>
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-export default function CandidateCard({ candidate, onSchedule, onWaitlist, index = 0 }) {
+export default function CandidateCard({ candidate, onSchedule, onWaitlist, index = 0, rankingId = null }) {
   const [expanded, setExpanded] = useState(false);
   const [waitlisting, setWaitlisting] = useState(false);
+  const [decided, setDecided] = useState(null);
   const queryClient = useQueryClient();
 
   const safe = {
     name:      candidate?.name || 'Unknown',
     role:      candidate?.target_role || 'Candidate',
-    exp:       candidate?.experience_years ?? 0,
-    consistency: candidate?.consistency_score ?? 0,
-    skills:    candidate?.skill_validation_score ?? 0,
-    roleMatch: candidate?.role_match_score ?? 0,
-    velocity:  candidate?.learning_velocity || 'Medium',
+    exp:       candidate?.experience_years ?? null,
+    consistency: candidate?.consistency_score ?? null,
+    skills:    candidate?.skill_validation_score ?? null,
+    roleMatch: candidate?.semantic_score ?? candidate?.role_match_score ?? null,
+    lv:        candidate?.lv_score ?? null,
+    analytical: candidate?.analytical_score ?? null,
+    final:     candidate?.final_score ?? null,
+    velocity:  candidate?.learning_velocity || 'N/A',
     fit:       candidate?.final_fit || 'Low',
     skillList: candidate?.skills || [],
     validated: candidate?.validated_skills || [],
@@ -91,21 +77,35 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
   const hasValidated = safe.validated.length > 0;
 
   const handleSchedule = async () => {
-    await logDecision(candidate, 'hire');
+    await logDecision(candidate, 'hire', rankingId);
+    setDecided('hire');
     onSchedule?.(candidate);
+  };
+
+  const handleReject = async () => {
+    const log = await logDecision(candidate, 'reject', rankingId);
+    if (log) {
+      setDecided('reject');
+      queryClient.invalidateQueries({ queryKey: ['ai-decisions'] });
+      queryClient.invalidateQueries({ queryKey: ['feedback-weights'] });
+      toast.success(`${safe.name} marked as rejected`);
+    } else {
+      toast.error('Could not record the decision');
+    }
   };
 
   const handleWaitlist = async () => {
     if (waitlisting) return;
     setWaitlisting(true);
     try {
-      await logDecision(candidate, 'waitlist');
+      await logDecision(candidate, 'waitlist', rankingId);
+      setDecided('waitlist');
       await jsonFetch('/api/waitlist/', {
         method: 'POST',
         body: JSON.stringify({
           candidate_name: safe.name,
           candidate_role: safe.role,
-          score: safe.roleMatch,
+          score: safe.final ?? safe.roleMatch ?? 0,
           notes: candidate?.explainability || '',
           status: 'waitlisted',
         }),
@@ -142,24 +142,35 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
                 {safe.name}
               </h3>
               <p className="text-sm truncate" style={{ color: 'var(--nh-text-secondary)' }}>
-                {safe.role} • {safe.exp}y exp
+                {safe.role} • {safe.exp === null ? 'experience not dated' : `${safe.exp}y exp`}
                 {candidate?.location ? ` • ${candidate.location}` : ''}
               </p>
             </div>
           </div>
-          <FitBadge level={safe.fit} />
+          <div className="flex flex-col items-end gap-1">
+            <FitBadge level={safe.fit} />
+            {decided && (
+              <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--nh-text-secondary)' }}>
+                {decided}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* ── Scores ── */}
-        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-          <ScoreRing score={safe.consistency} size={52} label="Consistency" color="var(--nh-success)" />
-          <ScoreRing score={safe.skills}      size={52} label="Skill Val."  color="var(--nh-warning)" />
-          <ScoreRing score={safe.roleMatch}   size={52} label="Role Match"  color="var(--nh-primary)" />
-          <div className="flex flex-col items-center gap-1">
-            <FitBadge level={safe.velocity} />
-            <span className="text-xs" style={{ color: 'var(--nh-text-secondary)' }}>Velocity</span>
-          </div>
+        {/* FS = 0.6·SS + 0.4·AS, AS = mean(CS, VS, LV) — paper §IV.E */}
+        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+          <ScoreRing score={safe.final}       size={56} label="Final (FS)"  />
+          <ScoreRing score={safe.roleMatch}   size={48} label="Semantic"    color="var(--nh-primary)" />
+          <ScoreRing score={safe.consistency} size={48} label="Consistency" color="var(--nh-success)" />
+          <ScoreRing score={safe.skills}      size={48} label="Skill Val."  color="var(--nh-warning)" />
+          <ScoreRing score={safe.lv}          size={48} label="Learning V." color="#9b7ec8" />
         </div>
+        <p className="text-[11px] mb-4" style={{ color: 'var(--nh-text-secondary)' }}>
+          Analytical (AS) {fmt(safe.analytical)}
+          {candidate?.missing_components?.length > 0 &&
+            ` · not available: ${candidate.missing_components.join(', ')}`}
+        </p>
 
         {/* ── Top consistency warning (collapsed preview) ── */}
         {safe.flags.length > 0 && !expanded && (
@@ -183,13 +194,13 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
             </div>
             <div className="flex items-center gap-3 mb-4 text-xs" style={{ color: 'var(--nh-text-secondary)' }}>
               <span className="flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" style={{ color: '#5a9e8a' }} /> Verified by project
+                <CheckCircle2 className="w-3 h-3" style={{ color: '#5a9e8a' }} /> Action verb nearby
               </span>
               <span className="flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3" style={{ color: '#c4894a' }} /> Cert only
+                <AlertTriangle className="w-3 h-3" style={{ color: '#c4894a' }} /> Mentioned 2+ times
               </span>
               <span className="flex items-center gap-1">
-                <HelpCircle className="w-3 h-3" style={{ color: '#999' }} /> Unverified
+                <HelpCircle className="w-3 h-3" style={{ color: '#999' }} /> Listed once
               </span>
             </div>
           </>
@@ -215,6 +226,12 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
             style={{ borderColor: 'var(--nh-border)', color: 'var(--nh-text)' }}>
             <Clock className="w-3.5 h-3.5 mr-1.5" />
             {waitlisting ? 'Adding...' : 'Waitlist'}
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleReject} disabled={decided === 'reject'}
+            className="rounded-xl font-medium px-3"
+            style={{ borderColor: 'var(--nh-border)', color: 'var(--nh-danger)' }}
+            title="Reject (recorded as recruiter feedback)">
+            <XCircle className="w-3.5 h-3.5" />
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)}
             className="rounded-xl px-2" style={{ color: 'var(--nh-text-secondary)' }}>
@@ -249,6 +266,50 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
                 </div>
               )}
 
+              {/* Dated positions (used for experience and learning velocity) */}
+              {candidate?.employment_history?.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5"
+                    style={{ color: 'var(--nh-text-secondary)' }}>
+                    <Briefcase className="w-3 h-3" /> Positions
+                  </h4>
+                  <div className="space-y-1">
+                    {candidate.employment_history.slice(0, 6).map((p, i) => (
+                      <p key={i} className="text-xs" style={{ color: 'var(--nh-text)' }}>
+                        {p.title || [p.company, p.title].filter(Boolean).join(' · ') || 'Position'}
+                        <span style={{ color: 'var(--nh-text-secondary)' }}>
+                          {' '}· {p.start || '?'} – {p.end || '?'}{p.months ? ` (${p.months} mo)` : ''}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                  {candidate?.experience_years_claimed != null && (
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--nh-text-secondary)' }}>
+                      Résumé claims {candidate.experience_years_claimed} years; dates support{' '}
+                      {candidate.experience_years_dated ?? 'n/a'}.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* JD skills not found in the résumé */}
+              {candidate?.missing_skills?.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider mb-2"
+                    style={{ color: 'var(--nh-text-secondary)' }}>
+                    Asked for in the JD, not in the résumé
+                  </h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {candidate.missing_skills.map((m, i) => (
+                      <span key={i} className="px-2 py-0.5 rounded-lg text-xs"
+                        style={{ border: '1px dashed var(--nh-border)', color: 'var(--nh-text-secondary)' }}>
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Education */}
               {candidate?.education && (
                 <div>
@@ -272,7 +333,7 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
                       <div key={i} className="flex items-start gap-2">
                         <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0"
                           style={{ background: 'var(--nh-primary)' }} />
-                        <p className="text-xs leading-relaxed" style={{ color: 'var(--nh-text)' }}>{p}</p>
+                        <p className="text-xs leading-relaxed" style={{ color: 'var(--nh-text)' }}>{projectText(p)}</p>
                       </div>
                     ))}
                   </div>
@@ -318,7 +379,7 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
                   style={{ background: 'var(--nh-card)', border: '1px solid var(--nh-border)' }}>
                   <h4 className="text-xs font-semibold uppercase tracking-wider mb-1"
                     style={{ color: 'var(--nh-primary)' }}>
-                    Why This Rating
+                    How this score was calculated
                   </h4>
                   <p className="text-xs leading-relaxed" style={{ color: 'var(--nh-text)' }}>
                     {candidate.explainability}

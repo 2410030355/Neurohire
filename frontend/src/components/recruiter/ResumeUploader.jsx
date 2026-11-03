@@ -157,7 +157,7 @@ export default function ResumeUploader({ onAnalysisComplete }) {
               <textarea
                 value={jobDescription}
                 onChange={e => setJobDescription(e.target.value)}
-                placeholder="Paste the full job description here…&#10;&#10;The AI will match candidates against this JD using TF-IDF semantic similarity (paper §IV.E), giving a much more accurate role match score than just the role name."
+                placeholder="Paste the full job description here…&#10;&#10;Semantic similarity (SS) is computed against this JD with Gemini embeddings (TF-IDF if Gemini is unavailable), which is more informative than the role name alone. To compare many candidates for one job, use Rank for a Job."
                 rows={7}
                 className="w-full mt-2 px-4 py-3 rounded-xl text-sm resize-none transition-all"
                 style={{

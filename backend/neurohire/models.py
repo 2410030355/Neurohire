@@ -219,6 +219,18 @@ class AIDecisionLog(models.Model):
     is_agreement = models.BooleanField(default=False)
 
     role_match_score = models.FloatField(blank=True, null=True)
+
+    # Candidates live in MongoDB (or come from search), so the SQL FK above is
+    # usually empty; candidate_ref holds the MongoDB / search id instead.
+    candidate_ref = models.CharField(max_length=64, blank=True, null=True)
+    ranking_id = models.CharField(max_length=32, blank=True, null=True)
+    # Paper components at decision time (used by the feedback rule, §IV.H)
+    semantic_score = models.FloatField(blank=True, null=True)
+    analytical_score = models.FloatField(blank=True, null=True)
+    final_score = models.FloatField(blank=True, null=True)
+    consistency_score = models.FloatField(blank=True, null=True)
+    weight_update = models.JSONField(blank=True, null=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

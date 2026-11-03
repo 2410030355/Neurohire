@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart3, TrendingUp, AlertTriangle, CheckCircle,
-  Brain, ShieldCheck, Zap, Target, Info
+  Brain, ShieldCheck, Zap, Target, Info, Scale
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { jsonFetch } from '@/api/http';
@@ -55,6 +55,65 @@ function InsightBanner({ type, message }) {
   );
 }
 
+// ── Feedback weights (paper §IV.H) ────────────────────────────────────────
+function FeedbackWeightsCard() {
+  const { data } = useQuery({
+    queryKey: ['feedback-weights'],
+    queryFn: () => jsonFetch('/api/feedback/weights/'),
+  });
+  if (!data) return null;
+  const pct = (v) => `${Math.round((v ?? 0) * 100)}%`;
+  const Bar = ({ label, w }) => (
+    <div className="mb-3">
+      <div className="flex justify-between text-xs mb-1" style={{ color: 'var(--nh-text-secondary)' }}>
+        <span>{label}</span><span>SS {pct(w?.w_ss)} · AS {pct(w?.w_as)}</span>
+      </div>
+      <div className="flex h-2 rounded-full overflow-hidden" style={{ background: 'var(--nh-border)' }}>
+        <div style={{ width: pct(w?.w_ss), background: 'var(--nh-primary)' }} />
+        <div style={{ width: pct(w?.w_as), background: '#9b7ec8' }} />
+      </div>
+    </div>
+  );
+  return (
+    <GlassCard hover={false}>
+      <h3 className="font-semibold mb-1 flex items-center gap-2" style={{ color: 'var(--nh-text)' }}>
+        <Scale className="w-4 h-4" /> Recruiter-feedback weights
+      </h3>
+      <p className="text-xs mb-4" style={{ color: 'var(--nh-text-secondary)' }}>
+        Each hire/reject moves w_SS by ±{data.learning_rate} toward the component (SS or AS) that dominated that
+        candidate's score, within [{data.bounds?.join(', ')}]. Scoring uses{' '}
+        <b>{data.adaptive_enabled ? 'the learned weights' : 'the configured weights'}</b>
+        {data.adaptive_enabled ? '' : ' (set ADAPTIVE_WEIGHTS=1 to use the learned ones)'}.
+      </p>
+      <Bar label="Configured" w={data.configured} />
+      <Bar label={`Learned (v${data.learned?.version ?? 0})`} w={data.learned} />
+      {data.history?.length > 0 && (
+        <div className="overflow-x-auto mt-2">
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ color: 'var(--nh-text-secondary)' }}>
+                {['v', 'Decision', 'SS', 'AS', 's', 'w_SS'].map(h => <th key={h} className="text-left py-1 pr-3">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {data.history.slice(0, 8).map(h => (
+                <tr key={h.version} style={{ color: 'var(--nh-text)', borderTop: '1px solid var(--nh-border-light)' }}>
+                  <td className="py-1 pr-3">{h.version}</td>
+                  <td className="py-1 pr-3 capitalize">{h.decision}</td>
+                  <td className="py-1 pr-3">{h.semantic_score == null ? '—' : Math.round(h.semantic_score)}</td>
+                  <td className="py-1 pr-3">{h.analytical_score == null ? '—' : Math.round(h.analytical_score)}</td>
+                  <td className="py-1 pr-3">{h.s > 0 ? `+${h.s}` : h.s}</td>
+                  <td className="py-1 pr-3">{h.before?.w_ss} → {h.after?.w_ss}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 export default function AIAnalytics() {
   const { data: rawLogs, isLoading } = useQuery({
@@ -62,42 +121,41 @@ export default function AIAnalytics() {
     queryFn: () => jsonFetch('/api/ai-decision-logs/'),
     initialData: [],
   });
+  const { data: rawCandidates } = useQuery({
+    queryKey: ['candidates'],
+    queryFn: () => jsonFetch('/api/candidates/'),
+    initialData: [],
+  });
 
   const logs = Array.isArray(rawLogs) ? rawLogs : (rawLogs?.results || []);
+  const allCandidates = Array.isArray(rawCandidates) ? rawCandidates : (rawCandidates?.results || []);
+  const scored = allCandidates.filter(c => c.source === 'resume_upload' && c.consistency_score != null);
 
   if (isLoading) return <LoadingSkeleton rows={3} />;
-  if (!logs.length) return (
-    <EmptyState icon={BarChart3} title="No Decision Data Yet"
-      description="AI analytics will appear here as you review candidates and make hiring decisions."
+  if (!logs.length && !scored.length) return (
+    <EmptyState icon={BarChart3} title="No Data Yet"
+      description="Analytics appear once résumés are analysed and recruiters make decisions."
       action={null} />
   );
 
-  // ── Core stats ──────────────────────────────────────────────────────────
+  // ── Core stats (recruiter decisions) ────────────────────────────────────
   const total       = logs.length;
   const agreements  = logs.filter(l => l.is_agreement).length;
   const disagreements = total - agreements;
-  const agreementRate = Math.round((agreements / total) * 100);
+  const agreementRate = total ? Math.round((agreements / total) * 100) : 0;
+  const pctOf = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : '—');
 
-  // ── Evaluation metrics (paper §V.C) ────────────────────────────────────
-  // HAAR — Human-AI Agreement Ratio
-  const HAAR = agreementRate;
-
-  // CDR — Consistency Detection Rate
-  // Proxy: % of candidates where consistency score < 80 (flags were raised)
-  const lowConsistency = logs.filter(l => (l.consistency_score || 100) < 80).length;
-  const CDR = total > 0 ? Math.round((lowConsistency / total) * 100) : 0;
-
-  // SVC — Skill Validation Coverage
-  // Proxy: % of decisions where role_match_score > 0 (skills were actually evaluated)
-  const evaluated = logs.filter(l => (l.role_match_score || 0) > 0).length;
-  const SVC = total > 0 ? Math.round((evaluated / total) * 100) : 0;
-
-  // LVS — Learning Velocity Sensitivity
-  // Proxy: % of decisions on High-velocity candidates that AI recommended hire
-  const highVelocityHires = logs.filter(
-    l => l.ai_recommendation === 'hire' && (l.role_match_score || 0) >= 70
-  ).length;
-  const LVS = total > 0 ? Math.round((highVelocityHires / total) * 100) : 0;
+  // ── Metrics (definitions match what is computed) ───────────────────────
+  // HAAR — share of decisions where the recruiter matched the AI's fit band
+  const HAAR = total ? `${agreementRate}%` : '—';
+  // CDR — share of scored candidates with at least one consistency rule triggered
+  const flagged = scored.filter(c => (c.consistency_flags?.length || 0) > 0 || c.consistency_score < 100).length;
+  const CDR = pctOf(flagged, scored.length);
+  // SVC — share of all detected skills that have action-verb evidence (Valid)
+  const allSkills = scored.flatMap(c => c.validated_skills || []);
+  const SVC = pctOf(allSkills.filter(v => v.status === 'Valid').length, allSkills.length);
+  // LVC — share of scored candidates whose learning velocity could be computed
+  const LVC = pctOf(scored.filter(c => c.lv_score != null).length, scored.length);
 
   // ── Disagreement insights (paper §IV.D) ────────────────────────────────
   const insights = [];
@@ -178,23 +236,23 @@ export default function AIAnalytics() {
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <MetricCard
-            icon={CheckCircle} label="HAAR" value={`${HAAR}%`}
-            subtitle="Human-AI Agreement Ratio"
+            icon={CheckCircle} label="HAAR" value={HAAR}
+            subtitle={`Human-AI agreement: decisions matching the AI's fit band (${total} decisions)`}
             color="#5a9e8a" delay={0}
           />
           <MetricCard
-            icon={ShieldCheck} label="CDR" value={`${CDR}%`}
-            subtitle="Consistency Detection Rate"
+            icon={ShieldCheck} label="CDR" value={CDR}
+            subtitle={`Consistency detection rate: candidates with ≥1 consistency rule triggered (${scored.length} scored)`}
             color="#7C9EC9" delay={0.05}
           />
           <MetricCard
-            icon={Brain} label="SVC" value={`${SVC}%`}
-            subtitle="Skill Validation Coverage"
+            icon={Brain} label="SVC" value={SVC}
+            subtitle={`Skill validation coverage: detected skills with action-verb evidence (${allSkills.length} skills)`}
             color="#c4894a" delay={0.1}
           />
           <MetricCard
-            icon={Zap} label="LVS" value={`${LVS}%`}
-            subtitle="Learning Velocity Sensitivity"
+            icon={Zap} label="LVC" value={LVC}
+            subtitle="Learning-velocity coverage: candidates with enough dated history to compute LV"
             color="#9b7ec8" delay={0.15}
           />
         </div>
@@ -297,6 +355,8 @@ export default function AIAnalytics() {
         </GlassCard>
       </div>
 
+      <FeedbackWeightsCard />
+
       {/* ── Section: Decision log table ── */}
       <GlassCard onClick={undefined}>
         <h3 className="font-semibold mb-4" style={{ color: 'var(--nh-text)' }}>
@@ -306,7 +366,7 @@ export default function AIAnalytics() {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--nh-border)' }}>
-                {['Candidate', 'AI Says', 'Recruiter Decision', 'Match %', 'Outcome'].map(h => (
+                {['Candidate', 'AI Says', 'Recruiter Decision', 'FS', 'Weight update', 'Outcome'].map(h => (
                   <th key={h} className="text-left py-2 pr-4 text-xs font-semibold uppercase tracking-wider"
                     style={{ color: 'var(--nh-text-secondary)' }}>{h}</th>
                 ))}
@@ -327,7 +387,13 @@ export default function AIAnalytics() {
                       {log.recruiter_decision || '—'}
                     </td>
                     <td className="py-2.5 pr-4" style={{ color: 'var(--nh-text-secondary)' }}>
-                      {log.role_match_score ? `${log.role_match_score}%` : '—'}
+                      {log.final_score != null ? Math.round(log.final_score)
+                        : log.role_match_score != null ? Math.round(log.role_match_score) : '—'}
+                    </td>
+                    <td className="py-2.5 pr-4 text-xs" style={{ color: 'var(--nh-text-secondary)' }}>
+                      {log.weight_update?.updated
+                        ? `w_SS ${log.weight_update.w_ss_before} → ${log.weight_update.w_ss_after}`
+                        : (log.weight_update?.reason || '—')}
                     </td>
                     <td className="py-2.5">
                       <span className="px-2 py-0.5 rounded-lg text-xs font-medium"

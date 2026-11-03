@@ -8,9 +8,9 @@ from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser, BasePermission
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, parser_classes
 
 from .models import (
     Candidate,
@@ -29,11 +29,21 @@ from .serializers import (
     InterviewSerializer,
     MockInterviewSerializer,
 )
-from .analysis_engine import analyze_resume, github_search_service, update_weights, get_current_weights
+from .authentication import OriginCheckedSessionAuthentication
+from .access import is_allowed_recruiter_email, user_email, recruiter_signup_hint
+from .analysis_engine import (
+    analyze_resume, github_search_service, get_current_weights,
+    get_similarity_batch, extract_skills,
+)
+from . import feedback
+from .mongo_client import mongo_get_ranking
+from .ranking import rank_candidates
 from .mongo_client import (
     mongo_insert_candidate, mongo_get_candidate,
     mongo_all_candidates, mongo_delete_all_candidates,
     mongo_find_by_github, mongo_is_available,
+    mongo_candidates_for_ranking, mongo_set_embedding_cache, mongo_save_ranking,
+    mongo_update_candidate_status,
 )
 
 User = get_user_model()
@@ -54,9 +64,14 @@ class IsRecruiter(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         try:
-            return request.user.profile.role == "recruiter"
+            is_recruiter = request.user.profile.role == "recruiter"
         except UserProfile.DoesNotExist:
             return False
+        # Re-checked on every request so removing an email/domain from the
+        # Render allowlist revokes access immediately. Staff always pass.
+        return is_recruiter and (
+            request.user.is_staff or is_allowed_recruiter_email(user_email(request.user))
+        )
 
 
 class IsJobSeeker(BasePermission):
@@ -119,16 +134,28 @@ def _user_payload(user):
 
 
 def _is_allowed_recruiter_email(email: str) -> bool:
-    """
-    Check if an email domain is in the allowed recruiter domains list.
-    Configured via ALLOWED_RECRUITER_DOMAINS in settings.py.
-    """
-    allowed_domains = getattr(settings, "ALLOWED_RECRUITER_DOMAINS", [])
-    if not allowed_domains:
-        # If no domains configured, block all recruiter registrations
-        return False
-    domain = email.split("@")[-1].lower().strip()
-    return domain in [d.lower().strip() for d in allowed_domains]
+    """Recruiter allowlist check (RECRUITER_ALLOWED_EMAILS / _DOMAINS). See access.py."""
+    return is_allowed_recruiter_email(email)
+
+
+def _validate_upload(file):
+    """Return an error message for an unacceptable résumé upload, else None."""
+    max_mb = getattr(settings, "MAX_UPLOAD_MB", 10)
+    allowed = getattr(settings, "ALLOWED_UPLOAD_EXTENSIONS", (".pdf", ".docx"))
+    ext = os.path.splitext(file.name or "")[1].lower()
+    if ext not in allowed:
+        return f"Unsupported file type '{ext or 'none'}'. Please upload a PDF or DOCX file."
+    if file.size > max_mb * 1024 * 1024:
+        return f"File is too large ({file.size / (1024 * 1024):.1f} MB). Maximum is {max_mb} MB."
+    if file.size == 0:
+        return "The uploaded file is empty."
+    return None
+
+
+def _safe_upload_path(original_name):
+    """Random on-disk name; never trust the client-supplied filename for paths."""
+    ext = os.path.splitext(original_name or "")[1].lower()
+    return os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}{ext}")
 
 
 # ==============================
@@ -139,9 +166,10 @@ class CandidateViewSet(viewsets.ViewSet):
     """
     Candidates are stored in MongoDB.
     GET /api/candidates/  → list all from MongoDB
+    Recruiter-only: documents contain candidates' personal details.
     """
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def list(self, request):
         candidates = mongo_all_candidates(limit=200)
@@ -153,73 +181,149 @@ class CandidateViewSet(viewsets.ViewSet):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(candidate)
 
+    CANDIDATE_STATUSES = {'new', 'analyzed', 'scheduled', 'waitlisted', 'hired', 'rejected'}
+
+    def partial_update(self, request, pk=None):
+        """PATCH /api/candidates/<id>/ {"status": "..."} — only the status can change."""
+        new_status = (request.data or {}).get('status')
+        if new_status not in self.CANDIDATE_STATUSES:
+            return Response({'error': f"status must be one of {sorted(self.CANDIDATE_STATUSES)}"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not mongo_update_candidate_status(pk, new_status):
+            return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'id': pk, 'status': new_status})
+
+
+class IsRecruiterOrReadOnly(BasePermission):
+    """Anyone may read job postings; only recruiters may create/edit/delete them."""
+
+    def has_permission(self, request, view):
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return True
+        return IsRecruiter().has_permission(request, view)
+
 
 class JobPostingViewSet(viewsets.ModelViewSet):
     queryset = JobPosting.objects.all().order_by("-id")
     serializer_class = JobPostingSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiterOrReadOnly]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
 
 
 class WaitlistEntryViewSet(viewsets.ModelViewSet):
     queryset = WaitlistEntry.objects.all().order_by("-id")
     serializer_class = WaitlistEntrySerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiter]  # waitlist holds candidate details
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
 
 
 class AIDecisionLogViewSet(viewsets.ModelViewSet):
     queryset = AIDecisionLog.objects.all().order_by("-id")
     serializer_class = AIDecisionLogSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    # Recruiter-only: every decision feeds the adaptive scoring weights.
+    # JSON-only so a cross-site HTML form cannot post without a CORS preflight.
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
     
-    def create(self, request, *args, **kwargs):
+    @staticmethod
+    def _num(v):
+        try:
+            return None if v in (None, '') else float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _components(self, log):
         """
-        Create an AIDecisionLog and trigger adaptive weight update.
+        SS and AS of the decided candidate, most trustworthy source first:
+        the stored ranking run, then the stored candidate, then the request.
         """
-        response = super().create(request, *args, **kwargs)
-        
-        # Extract recruiter_decision and role_match_score from request
-        recruiter_decision = request.data.get('recruiter_decision')
-        role_match_score = request.data.get('role_match_score')
-        
-        if recruiter_decision:
-            # Trigger weight update based on recruiter decision
-            update_weights(recruiter_decision, match_score=role_match_score)
-            logger.info(f"Weights updated after '{recruiter_decision}' decision. "
-                       f"Current weights: {get_current_weights()}")
-        
-        return response
-    
-    def update(self, request, *args, **kwargs):
-        """
-        Update an AIDecisionLog and trigger adaptive weight update if decision changed.
-        """
-        # Get the old decision before update
-        instance = self.get_object()
-        old_decision = instance.recruiter_decision if instance else None
-        
-        response = super().update(request, *args, **kwargs)
-        
-        # Extract new recruiter_decision from request
-        recruiter_decision = request.data.get('recruiter_decision')
-        role_match_score = request.data.get('role_match_score')
-        
-        # Only update weights if decision actually changed
-        if recruiter_decision and recruiter_decision != old_decision:
-            update_weights(recruiter_decision, match_score=role_match_score)
-            logger.info(f"Weights updated after decision change from '{old_decision}' to '{recruiter_decision}'. "
-                       f"Current weights: {get_current_weights()}")
-        
-        return response
+        ref = log.candidate_ref
+        if log.ranking_id and ref:
+            run = mongo_get_ranking(log.ranking_id)
+            for r in (run or {}).get('results', []):
+                if r.get('candidate_id') == ref:
+                    return r.get('semantic_score'), r.get('analytical_score'), r.get('final_score'), 'ranking'
+        if ref:
+            doc = mongo_get_candidate(ref)
+            if doc and (doc.get('semantic_score') is not None or doc.get('analytical_score') is not None):
+                return doc.get('semantic_score'), doc.get('analytical_score'), doc.get('final_score'), 'candidate'
+        return log.semantic_score, log.analytical_score, log.final_score, 'request'
+
+    def _apply_feedback(self, log, previous_decision=None):
+        ss, as_score, fs, source = self._components(log)
+        result = feedback.record_feedback(
+            log.recruiter_decision, ss, as_score, previous_decision=previous_decision,
+            context={'decision_log_id': log.pk, 'candidate_ref': log.candidate_ref,
+                     'ranking_id': log.ranking_id, 'score_source': source,
+                     'user_id': getattr(self.request.user, 'pk', None)})
+        log.semantic_score, log.analytical_score = ss, as_score
+        log.final_score = fs if fs is not None else log.final_score
+        log.weight_update = {
+            'updated': result['updated'], 's': result['s'], 'reason': result['reason'],
+            'score_source': source,
+            'w_ss_before': result['before']['w_ss'], 'w_ss_after': result['after']['w_ss'],
+            'version': result['after'].get('version'),
+        }
+        log.save(update_fields=['semantic_score', 'analytical_score', 'final_score', 'weight_update'])
+        return log.weight_update
+
+    def perform_create(self, serializer):
+        """Log a recruiter decision and apply the feedback rule (paper §IV.H)."""
+        log = serializer.save()
+        self._apply_feedback(log)
+
+    def perform_update(self, serializer):
+        """A changed decision applies s_new − s_old (undoes the earlier update)."""
+        previous = serializer.instance.recruiter_decision
+        log = serializer.save()
+        if log.recruiter_decision != previous:
+            self._apply_feedback(log, previous_decision=previous)
+
+
+class FeedbackWeightsView(APIView):
+    """
+    GET  /api/feedback/weights/        learned weights, weights FS uses, history
+    POST /api/feedback/weights/reset/  back to 0.6 / 0.4 (staff only)
+    """
+    parser_classes = [JSONParser]
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+
+    def get(self, request):
+        learned = feedback.get_learned_weights()
+        used = feedback.get_scoring_weights()
+        return Response({
+            'adaptive_enabled': feedback.adaptive_enabled(),
+            'learning_rate': feedback.ETA,
+            'bounds': [feedback.W_MIN, feedback.W_MAX],
+            'configured': {k: v for k, v in feedback.default_weights().items() if k != 'version'},
+            'learned': {'w_ss': learned['w_ss'], 'w_as': learned['w_as'], 'version': learned.get('version', 0)},
+            'in_use': used,
+            'history': feedback.feedback_history(limit=int(request.GET.get('limit', 20) or 20)),
+        })
+
+
+class FeedbackWeightsResetView(APIView):
+    parser_classes = [JSONParser]
+    permission_classes = [IsAdminUser]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+
+    def post(self, request):
+        d = feedback.reset_weights()
+        return Response({'w_ss': d['w_ss'], 'w_as': d['w_as'], 'version': d['version']})
 
 
 class InterviewViewSet(viewsets.ModelViewSet):
     queryset = Interview.objects.all().order_by("-id")
     serializer_class = InterviewSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    # Seekers read their schedule, recruiters manage it: login required.
+    # (Per-user filtering of the list is a follow-up.)
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+    parser_classes = [JSONParser]
 
 
 class MockInterviewViewSet(viewsets.ModelViewSet):
@@ -237,14 +341,25 @@ UPLOAD_DIR = os.path.join(settings.BASE_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+def _remove_upload(file_path):
+    """Delete a temporary résumé file. Résumés contain personal data and are
+    only needed while being analysed, so they are never kept on disk."""
+    try:
+        os.remove(file_path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.error(f"Could not delete uploaded file {os.path.basename(file_path)}: {e}")
+
+
 class ResumeUploadView(APIView):
     """
-    Resume upload + AI analysis endpoint.
-    Open to any authenticated user — recruiter check done via frontend routing.
+    Resume upload + AI analysis endpoint. Recruiter-only: every upload is
+    stored as a candidate profile and spends Gemini quota.
     """
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [AllowAny]  # CSRF exempt in urls.py handles security
-    authentication_classes = []
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def post(self, request):
         file = request.FILES.get("resume")
@@ -257,15 +372,18 @@ class ResumeUploadView(APIView):
                 {"error": "No file uploaded"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        upload_error = _validate_upload(file)
+        if upload_error:
+            return Response({"error": upload_error}, status=status.HTTP_400_BAD_REQUEST)
 
-        unique_name = f"{uuid.uuid4()}_{file.name}"
-        file_path = os.path.join(UPLOAD_DIR, unique_name)
+        file_path = _safe_upload_path(file.name)
 
         try:
             with open(file_path, "wb+") as f:
                 for chunk in file.chunks():
                     f.write(chunk)
         except Exception as e:
+            _remove_upload(file_path)
             return Response(
                 {"error": f"File save failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -278,41 +396,71 @@ class ResumeUploadView(APIView):
                 {"error": f"Analysis failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+        finally:
+            _remove_upload(file_path)
 
         # ── Save unified candidate profile to MongoDB ──────────────────
         mongo_doc = {
             'name':                   analysis.get('name') or name,
             'email':                  analysis.get('email'),
             'phone':                  analysis.get('phone'),
-            'resume_url':             unique_name,
+            'resume_filename':        os.path.basename(file.name or ''),  # file itself is not kept
             'target_role':            target_role,
             'job_description':        job_description,
             'source':                 'resume_upload',
             'status':                 'analyzed',
             # AI scores
-            'consistency_score':      analysis.get('consistency_score', 0),
-            'skill_validation_score': analysis.get('skill_validation_score', 0),
-            'learning_velocity':      analysis.get('learning_velocity', 'Medium'),
-            'role_match_score':       analysis.get('role_match_score', 0),
+            # Paper §IV scores (None = not computable, never silently 0)
+            'semantic_score':         analysis.get('semantic_score'),
+            'role_match_score':       analysis.get('role_match_score'),
+            'similarity_method':      analysis.get('similarity_method'),
+            'consistency_score':      analysis.get('consistency_score'),
+            'consistency_flags':      analysis.get('consistency_flags', []),
+            'skill_validation_score': analysis.get('skill_validation_score'),
+            'skill_evidence_band':    analysis.get('skill_evidence_band'),
+            'lv_raw':                 analysis.get('lv_raw'),
+            'lv_score':               analysis.get('lv_score'),
+            'lv_new_skills':          analysis.get('lv_new_skills', []),
+            'lv_span_years':          analysis.get('lv_span_years'),
+            'learning_velocity':      analysis.get('learning_velocity', 'N/A'),
+            'analytical_score':       analysis.get('analytical_score'),
+            'missing_components':     analysis.get('missing_components', []),
+            'final_score':            analysis.get('final_score'),
+            'score_weights':          analysis.get('score_weights'),
             'final_fit':              analysis.get('final_fit', 'Medium'),
+            'jd_skills':              analysis.get('jd_skills', []),
+            # Internal: lets /api/rank/ re-score this candidate against any JD.
+            # Excluded from every API response (mongo_client.INTERNAL_FIELDS).
+            'resume_text_redacted':   analysis.get('resume_text_redacted'),
+            'embedding_cache':        analysis.get('embedding_cache'),
             'explainability':         analysis.get('explainability', ''),
-            'resume_strength_score':  analysis.get('resume_strength_score', 0),
+            'resume_strength_score':  (analysis.get('resume_strength_score') or 0),
             # Profile
             'skills':                 analysis.get('skills', []),
             'validated_skills':       analysis.get('validated_skills', []),
+            'validated_skills_evidence': analysis.get('validated_skills_evidence', []),
             'missing_skills':         analysis.get('missing_skills', []),
             'experience_years':       analysis.get('experience_years'),
+            'experience_years_dated':   analysis.get('experience_years_dated'),
+            'experience_years_claimed': analysis.get('experience_years_claimed'),
+            'experience_source':      analysis.get('experience_source'),
+            'employment_history':     analysis.get('employment_history', []),
+            'projects':               analysis.get('projects', []),
+            'other_skills':           analysis.get('other_skills', []),
+            'extraction_method':      analysis.get('extraction_method'),
             'education':              analysis.get('education'),
             'profile_summary':        analysis.get('profile_summary'),
             'career_trajectory':      analysis.get('career_trajectory'),
         }
         mongo_id = mongo_insert_candidate(mongo_doc)
 
+        public_analysis = {k: v for k, v in analysis.items()
+                           if k not in ('resume_text_redacted', 'embedding_cache')}
         return Response(
             {
                 'message': 'Analysis complete',
                 'candidate_id': mongo_id or 'local',
-                'analysis': analysis,
+                'analysis': public_analysis,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -327,10 +475,11 @@ class SeekerResumeView(APIView):
     """
     Resume analysis endpoint for job seekers.
     Returns personal improvement feedback instead of recruiter-style scoring.
+    Login required (any role) so anonymous traffic can't drain the Gemini quota.
     """
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     # Common skill sets by role category for gap analysis
     ROLE_SKILL_MAP = {
@@ -366,9 +515,9 @@ class SeekerResumeView(APIView):
         """Generate seeker-focused improvement suggestions from analysis data."""
         tips = []
         skills = analysis.get('skills', [])
-        experience = analysis.get('experience_years', 0)
-        strength = analysis.get('resume_strength_score', 0)
-        consistency = analysis.get('consistency_score', 0)
+        experience = (analysis.get('experience_years') or 0)
+        strength = (analysis.get('resume_strength_score') or 0)
+        consistency = (analysis.get('consistency_score') or 0)
         education = analysis.get('education', '')
 
         # Skill count feedback
@@ -378,7 +527,7 @@ class SeekerResumeView(APIView):
             tips.append("You have a decent skill set. Consider adding 3-4 more tools or technologies you've used.")
 
         # Role match feedback
-        role_score = analysis.get('role_match_score', 0)
+        role_score = (analysis.get('role_match_score') or 0)
         if role_score < 40:
             tips.append(f"Your current skills don't closely match '{target_role}'. Focus on learning the core technologies for this role.")
         elif role_score < 65:
@@ -427,7 +576,7 @@ class SeekerResumeView(APIView):
         """Identify what the seeker is already doing well."""
         strengths = []
         skills = analysis.get('skills', [])
-        experience = analysis.get('experience_years', 0)
+        experience = (analysis.get('experience_years') or 0)
         velocity = analysis.get('learning_velocity', 'Medium')
 
         if len(skills) >= 8:
@@ -438,7 +587,7 @@ class SeekerResumeView(APIView):
             strengths.append("High learning velocity — you pick up new technologies quickly")
         if analysis.get('education'):
             strengths.append(f"Strong educational background: {analysis['education']}")
-        if analysis.get('role_match_score', 0) >= 65:
+        if (analysis.get('role_match_score') or 0) >= 65:
             strengths.append("Good alignment with your target role")
         if not strengths:
             strengths.append("You have a foundation to build on — focus on targeted skill development")
@@ -450,15 +599,18 @@ class SeekerResumeView(APIView):
 
         if not file:
             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
+        upload_error = _validate_upload(file)
+        if upload_error:
+            return Response({'error': upload_error}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save file
-        unique_name = f"{uuid.uuid4()}_{file.name}"
-        file_path = os.path.join(UPLOAD_DIR, unique_name)
+        # Save file (temporary — deleted right after analysis)
+        file_path = _safe_upload_path(file.name)
         try:
             with open(file_path, 'wb+') as f:
                 for chunk in file.chunks():
                     f.write(chunk)
         except Exception as e:
+            _remove_upload(file_path)
             return Response({'error': f'File save failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Run analysis
@@ -466,6 +618,8 @@ class SeekerResumeView(APIView):
             analysis = analyze_resume(file_path, target_role)
         except Exception as e:
             return Response({'error': f'Analysis failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        finally:
+            _remove_upload(file_path)
 
         # Build seeker-focused response
         skill_gaps = self._generate_skill_gaps(analysis, target_role)
@@ -473,8 +627,8 @@ class SeekerResumeView(APIView):
         strengths = self._generate_strengths(analysis)
 
         # Overall readiness score (seeker-friendly, not recruiter score)
-        role_score = analysis.get('role_match_score', 0)
-        strength_score = analysis.get('resume_strength_score', 0)
+        role_score = (analysis.get('role_match_score') or 0)
+        strength_score = (analysis.get('resume_strength_score') or 0)
         readiness = round((role_score * 0.5) + (strength_score * 0.5))
 
         # Compute role_fit label from role_score
@@ -496,7 +650,7 @@ class SeekerResumeView(APIView):
             'role_alignment':        round(role_score),
             'final_fit':             role_fit,                 # for FitBadge
             'learning_velocity':     analysis.get('learning_velocity', 'Medium'),
-            'experience_years':      analysis.get('experience_years', 0),
+            'experience_years':      (analysis.get('experience_years') or 0),
             'education':             analysis.get('education', ''),
 
             # Skills — named to match ResumeImprover.jsx exactly
@@ -511,6 +665,119 @@ class SeekerResumeView(APIView):
 
 
 # ==============================
+# Candidate Ranking API (paper §IV.E.3)
+# ==============================
+
+class RankCandidatesView(APIView):
+    """
+    POST /api/rank/
+      {
+        "job_description": "...",          required (min 20 characters)
+        "vs_variant":      "paper" | "jd"  optional; 'jd' = JD-conditioned evidence
+        "candidate_ids":   ["..."],        optional; default = all stored résumés
+        "top_k":           20,             optional; how many results to return
+        "components":      ["SS","CS","VS","LV"]   optional ablation
+      }
+    Recomputes SS against this JD for every candidate, normalises LV across
+    the candidates being ranked, combines into AS and FS, and orders by FS.
+    The run is stored (ranking_id) so recruiter decisions can refer to it.
+    """
+    parser_classes = [JSONParser]
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
+
+    MAX_CANDIDATES = 200
+    VALID_COMPONENTS = {'SS', 'CS', 'VS', 'LV'}
+
+    def post(self, request):
+        data = request.data or {}
+        jd = (data.get('job_description') or '').strip()
+        if len(jd) < 20:
+            return Response({'error': 'job_description is required (at least 20 characters).'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        jd = jd[:10000]
+
+        components = data.get('components') or list(self.VALID_COMPONENTS)
+        if not isinstance(components, list) or not set(components) <= self.VALID_COMPONENTS or 'SS' not in components:
+            return Response({'error': 'components must be a subset of SS, CS, VS, LV that includes SS.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            top_k = int(data.get('top_k') or 50)
+        except (TypeError, ValueError):
+            return Response({'error': 'top_k must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+        top_k = max(1, min(top_k, self.MAX_CANDIDATES))
+
+        vs_variant = data.get('vs_variant') or 'paper'
+        if vs_variant not in ('paper', 'jd'):
+            return Response({'error': "vs_variant must be 'paper' or 'jd'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        ids = data.get('candidate_ids')
+        if ids is not None and not isinstance(ids, list):
+            return Response({'error': 'candidate_ids must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not mongo_is_available():
+            return Response({'error': 'Candidate database unavailable.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        docs = mongo_candidates_for_ranking(ids=ids, limit=self.MAX_CANDIDATES)
+        if not docs:
+            return Response({'results': [], 'total_ranked': 0,
+                             'message': 'No stored résumés to rank. Upload résumés first.'})
+
+        candidates = [{
+            'id': d['id'], 'name': d.get('name'), 'text': d.get('resume_text_redacted'),
+            'skills': d.get('skills') or [], 'experience_years': d.get('experience_years'),
+            'consistency_score': d.get('consistency_score'),
+            'skill_validation_score': d.get('skill_validation_score'),
+            'validated_skills_evidence': d.get('validated_skills_evidence') or [],
+            'lv_raw': d.get('lv_raw'), 'embedding_cache': d.get('embedding_cache'),
+        } for d in docs]
+
+        weights = feedback.get_scoring_weights()
+        ranked = rank_candidates(candidates, jd, get_similarity_batch, extract_skills,
+                                 w_ss=weights['w_ss'], w_as=weights['w_as'],
+                                 components=set(components), vs_variant=vs_variant)
+
+        for cand, cache in zip(candidates, ranked['new_embeddings']):
+            if cache:
+                mongo_set_embedding_cache(cand['id'], cache)
+
+        by_id = {d['id']: d for d in docs}
+        results = []
+        for r in ranked['results'][:top_k]:
+            d = by_id.get(r['candidate_id'], {})
+            results.append({**r, 'email': d.get('email'), 'education': d.get('education'),
+                            'consistency_flags': d.get('consistency_flags', []),
+                            'validated_skills': d.get('validated_skills', []),
+                            'skills': d.get('skills', [])})
+
+        ranking_id = mongo_save_ranking({
+            'job_description': jd,
+            'created_by': request.user.pk,
+            'method': ranked['method'],
+            'weights': ranked['weights'],
+            'components': ranked['components'],
+            'vs_variant': vs_variant,
+            'lv_bounds': ranked['lv_bounds'],
+            'results': [{k: r[k] for k in ('candidate_id', 'rank', 'semantic_score', 'consistency_score',
+                                           'skill_validation_score', 'lv_score', 'analytical_score',
+                                           'final_score', 'final_fit')}
+                        for r in ranked['results']],
+        })
+
+        return Response({
+            'ranking_id': ranking_id,
+            'total_ranked': len(ranked['results']),
+            'similarity_method': ranked['method'],
+            'weights': ranked['weights'],
+            'weights_source': weights['source'],
+            'components': ranked['components'],
+            'vs_variant': vs_variant,
+            'lv_bounds': ranked['lv_bounds'],
+            'jd_skills': ranked['jd_skills'],
+            'results': results,
+        })
+
+
+# ==============================
 # GitHub Candidate Search API
 # ==============================
 
@@ -520,6 +787,7 @@ class GitHubSearchView(APIView):
     """
     parser_classes = [JSONParser]
     permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def get(self, request):
         query = request.GET.get('q') or request.GET.get('query', '')
@@ -1108,10 +1376,11 @@ class TalentSearchView(APIView):
     Search for talent across GitHub or job portals.
     - search_type = 'github'  → real GitHub API search
     - search_type = 'portal'  → simulated portal candidates
+    Recruiter-only (spends the GitHub API quota).
     """
     parser_classes = [JSONParser]
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsRecruiter]
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def post(self, request):
         data = request.data or {}
@@ -1703,15 +1972,8 @@ class RegisterView(APIView):
 
         # ── Recruiter domain check ──────────────────────────────────
         if role == "recruiter" and not _is_allowed_recruiter_email(email):
-            allowed_domains = getattr(settings, "ALLOWED_RECRUITER_DOMAINS", [])
-            domain_hint = ", ".join(allowed_domains) if allowed_domains else "no domains configured"
             return Response(
-                {
-                    "error": (
-                        "Recruiter accounts require an official company email address. "
-                        f"Allowed domains: {domain_hint}"
-                    )
-                },
+                {"error": "This email is not approved for recruiter access. " + recruiter_signup_hint()},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1775,8 +2037,20 @@ class LoginView(APIView):
             )
 
         # Ensure profile exists for legacy users (created before this update)
-        if not UserProfile.objects.filter(user=user).exists():
-            UserProfile.objects.get_or_create(user=user, defaults={"role": "jobseeker"})
+        profile, _ = UserProfile.objects.get_or_create(user=user, defaults={"role": "jobseeker"})
+
+        # Recruiter login page sends role="recruiter". Only allowlisted emails
+        # may hold that role; an approved jobseeker account is upgraded.
+        requested_role = (data.get("role") or "").strip().lower()
+        if requested_role == "recruiter":
+            if not (user.is_staff or _is_allowed_recruiter_email(user_email(user))):
+                return Response(
+                    {"error": "This account is not approved for recruiter access. " + recruiter_signup_hint()},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if profile.role != "recruiter":
+                profile.role = "recruiter"
+                profile.save(update_fields=["role"])
 
         # ✅ Explicitly set backend to avoid _get_backend_from_user crash with social_django
         if not hasattr(user, 'backend'):
@@ -1835,6 +2109,13 @@ FOLLOW_UPS_SEEKER = {
 def _get_follow_ups(role, intent):
     table = FOLLOW_UPS_SEEKER if role == 'jobseeker' else FOLLOW_UPS_RECRUITER
     return table.get(intent, table['general'])
+
+def _get_db():
+    """MongoDB handle for the chatbot (was called but never imported, so the
+    chatbot silently ran without history or candidate data)."""
+    from .mongo_client import _get_db as _mongo_db
+    return _mongo_db()
+
 
 def _get_session_id(request):
     """Get or create a session ID for this user."""
@@ -1933,12 +2214,13 @@ def _build_candidate_pipeline(q):
 
     pipeline = [
         {'$match': pipeline_match},
-        {'$sort': {'role_match_score': -1}},
+        {'$sort': {'final_score': -1, 'role_match_score': -1}},
         {'$limit': 5},
         {'$project': {
             '_id': 0,
             'name': 1,
             'role_match_score': 1,
+            'final_score': 1,
             'final_fit': 1,
             'skills': {'$slice': ['$skills', 4]},
             'experience_years': 1,
@@ -1958,7 +2240,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
             NL = '\n'
             if any(w in q for w in ['how many','count','total','number','stats','summary']):
                 pipeline = [
-                    {'$group': {'_id': '$final_fit','count': {'$sum': 1},'avg_score': {'$avg': '$role_match_score'}}},
+                    {'$group': {'_id': '$final_fit','count': {'$sum': 1},'avg_score': {'$avg': '$final_score'}}},
                     {'$sort': {'count': -1}},
                 ]
                 rows = list(db.candidates.aggregate(pipeline))
@@ -1966,7 +2248,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                     return 'No candidates yet. Upload resumes to get started.', 'candidates'
                 total = sum(r['count'] for r in rows)
                 parts = ['- %s fit: %d candidates (avg %.0f%% match)' % (r['_id'] or 'Unknown', r['count'], r.get('avg_score') or 0) for r in rows]
-                return ('**%d candidates** in the system:' % total) + NL + NL.join(parts), 'candidates'
+                return ('**%d candidates** in the system (avg = final score):' % total) + NL + NL.join(parts), 'candidates'
 
             pipeline, skill, exp = _build_candidate_pipeline(q)
             has_filter = bool(skill or exp or any(w in q for w in ['high fit','medium fit','low fit','github','upload']))
@@ -1981,21 +2263,21 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                 for c in rows:
                     sp  = ', '.join((c.get('skills') or [])[:3]) or 'N/A'
                     ev  = '%.0fyr' % c.get('experience_years',0) if c.get('experience_years') else ''
-                    parts.append('- **%s** - %s fit (%.0f%%) %s%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('role_match_score',0), ev, NL, sp))
+                    parts.append('- **%s** - %s fit (FS %.0f) %s%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('final_score') or c.get('role_match_score') or 0, ev, NL, sp))
                 fd2 = []
                 if skill: fd2.append('**%s**' % skill)
                 if exp:   fd2.append('**%d+ years**' % exp)
                 hdr = ('Candidates with %s:' % ' & '.join(fd2) + NL) if fd2 else ('Filtered candidates:' + NL)
                 return hdr + NL.join(parts), 'candidates'
 
-            rows = list(db.candidates.find({},{'name':1,'role_match_score':1,'final_fit':1,'skills':1,'experience_years':1,'_id':0}).sort('role_match_score',-1).limit(5))
+            rows = list(db.candidates.find({},{'name':1,'role_match_score':1,'final_score':1,'final_fit':1,'skills':1,'experience_years':1,'_id':0}).sort([('final_score',-1),('role_match_score',-1)]).limit(5))
             if not rows:
                 return 'No candidates analyzed yet. Upload resumes in the Resume Analysis tab.', 'candidates'
             parts = []
             for c in rows:
                 sp = ', '.join((c.get('skills') or [])[:3]) or 'N/A'
-                parts.append('- **%s** - %s fit (%.0f%%)%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('role_match_score',0), NL, sp))
-            return '**Top candidates by role match:**' + NL + NL.join(parts), 'candidates'
+                parts.append('- **%s** - %s fit (FS %.0f)%s  Skills: %s' % (c['name'], c.get('final_fit','?'), c.get('final_score') or c.get('role_match_score') or 0, NL, sp))
+            return '**Top candidates by final score (FS):**' + NL + NL.join(parts), 'candidates'
         except Exception as e:
             return 'Could not fetch candidates. Error: %s' % str(e)[:80], 'candidates'
 
@@ -2014,8 +2296,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                     'Checks:' + NL +
                     '- Senior skills + under 1.5yr experience' + NL +
                     '- Too many skills for experience level' + NL +
-                    '- Advanced tools without foundational skills' + NL +
-                    '- High experience but very few skills'), 'analytics'
+                    '- Advanced tools without foundational skills'), 'analytics'
         if 'svc' in q:
             return ('**SVC - Skill Validation Coverage**' + NL +
                     'Percentage of candidates with project-backed skills.' + NL + NL +
@@ -2046,27 +2327,28 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
 
     if intent == 'platform':
         if any(w in q for w in ['skill valid','verify skill','validation']):
-            return ('**Evidence-Backed Skill Validation**' + NL +
-                    'Scans 120-char window around each skill.' + NL + NL +
-                    '- **Valid** = action verb found (built, deployed, implemented)' + NL +
-                    '- **Partial** = skill appears multiple times, no action verb' + NL +
-                    '- **Unverified** = just listed, no evidence' + NL + NL +
-                    'Prevents keyword stuffing from inflating scores.'), 'platform'
+            return ('**Skill Validation Score (VS)**' + NL +
+                    'Looks 60 characters either side of the first mention of each skill.' + NL + NL +
+                    '- **Valid** = an action verb is there (built, developed, deployed, led...)' + NL +
+                    '- **Partial** = no verb, but the skill is mentioned 2+ times' + NL +
+                    '- **Unverified** = mentioned once with no verb' + NL + NL +
+                    'VS = Valid skills / all skills x 100. It measures textual evidence, '
+                    'not proficiency.'), 'platform'
         if any(w in q for w in ['score','match','role match','fit score']):
-            return ('**Role Match Scoring**' + NL +
-                    'TF-IDF cosine similarity between resume and job description.' + NL + NL +
-                    '- High fit = 70%+' + NL +
-                    '- Medium fit = 40-69%' + NL +
-                    '- Low fit = below 40%' + NL + NL +
-                    'Paste a full JD for richer 200-feature bigram matching.'), 'platform'
+            return ('**How candidates are scored**' + NL +
+                    '- **SS** semantic similarity = cosine of Gemini embeddings of resume and JD (TF-IDF if Gemini is unavailable) x 100' + NL +
+                    '- **AS** analytical score = mean of Consistency, Skill validation and Learning velocity' + NL +
+                    '- **FS** final score = 0.6 x SS + 0.4 x AS' + NL + NL +
+                    'Fit: High = FS 70+, Medium = 40-69, Low = below 40.' + NL +
+                    'Names and contact details are removed before similarity is computed.'), 'platform'
         if 'consistency' in q:
             return ('**Consistency Scoring**' + NL +
                     'Starts at 100, deducts for contradictions:' + NL + NL +
                     '- Senior skills + under 1.5yr exp = -20 pts' + NL +
                     '- Too many skills for experience = -12 pts' + NL +
-                    '- Advanced tools without foundations = -15 pts' + NL +
-                    '- High exp but very few skills = -18 pts' + NL + NL +
-                    'Score never drops below 30.'), 'platform'
+                    '- Advanced tools without foundations = -15 pts' + NL + NL +
+                    'Deductions add up (lowest possible score is 53). Rules that need '
+                    'experience are skipped when the resume gives none.'), 'platform'
         if any(w in q for w in ['upload','pdf','docx','file']):
             return ('**Resume Upload**' + NL +
                     'Supports PDF and DOCX.' + NL + NL +
@@ -2088,8 +2370,8 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
             return ('**Talent Search (GitHub)**' + NL +
                     'Searches GitHub profiles by role keyword.' + NL + NL +
                     '- Fetches real GitHub users via GitHub API' + NL +
-                    '- Runs same NLP analysis pipeline' + NL +
-                    '- Returns skill validation, consistency, and role fit' + NL +
+                    '- Profile score from repos, followers and languages' + NL +
+                    '- Optional enrichment, separate from resume scoring' + NL +
                     '- Stored in MongoDB candidates collection'), 'platform'
         if any(w in q for w in ['mock','interview practice']):
             return ('**Mock Interview**' + NL +
@@ -2099,12 +2381,11 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
                     '- Tracks speaking pace' + NL +
                     '- Gives improvement tips per answer'), 'platform'
         if any(w in q for w in ['learning velocity','velocity']):
-            return ('**Learning Velocity**' + NL +
-                    'Measures growth language in the resume.' + NL + NL +
-                    'High velocity = built, launched, led, scaled, promoted' + NL + NL +
-                    '- High = 4+ growth indicators' + NL +
-                    '- Medium = 2-3' + NL +
-                    '- Low = 0-1'), 'platform'
+            return ('**Learning Velocity (LV)**' + NL +
+                    'New skills that appear in later jobs, per year of dated work history.' + NL + NL +
+                    '- Needs at least 2 dated positions that mention skills (otherwise N/A)' + NL +
+                    '- Normalised 0-100 across the candidates being compared' + NL +
+                    '- High = 67+, Medium = 33-66, Low = below 33'), 'platform'
         return ('**NeuroHire Platform**' + NL + NL +
                 'Recruiter module:' + NL +
                 '- Resume Analysis with AI scoring' + NL +
@@ -2128,7 +2409,7 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
         if any(w in q for w in ['readiness', 'how is my score']):
             return ('**Readiness Score**' + NL +
                     'Combines two things equally:' + NL + NL +
-                    '- 50% Role Match - how well your resume matches the target role (TF-IDF similarity)' + NL +
+                    '- 50% Role Match - semantic similarity between your resume and the target role' + NL +
                     '- 50% Resume Strength - skills, education, and experience depth' + NL + NL +
                     'Improve either side to raise your overall readiness.'), 'seeker'
         if any(w in q for w in ['mock', 'interview']):
@@ -2189,8 +2470,10 @@ def _chatbot_reply(intent, message, db, role='recruiter'):
 
 
 class ChatbotView(APIView):
-    permission_classes = []
-    authentication_classes = []
+    permission_classes = [AllowAny]
+    # Session auth so the server knows who is asking; candidate data is only
+    # answered for verified recruiters, whatever 'role' the browser sends.
+    authentication_classes = [OriginCheckedSessionAuthentication]
 
     def get(self, request):
         """Return conversation history for this session from MongoDB."""
@@ -2208,9 +2491,8 @@ class ChatbotView(APIView):
         """Process a chat message, save to MongoDB, return reply + role-aware follow-ups."""
         try:
             message = (request.data.get('message') or '').strip()[:500]
-            role    = (request.data.get('role') or 'recruiter').strip().lower()
-            if role not in ('recruiter', 'jobseeker'):
-                role = 'recruiter'
+            # Recruiter answers (candidate data) only for verified recruiters.
+            role = 'recruiter' if IsRecruiter().has_permission(request, self) else 'jobseeker'
             if not message:
                 return Response({'error': 'Message required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2271,7 +2553,7 @@ class ChatbotView(APIView):
             return Response({
                 'reply': "Something went wrong. Please try again.",
                 'intent': 'general',
-                'follow_ups': FOLLOW_UPS['general'],
+                'follow_ups': _get_follow_ups('jobseeker', 'general'),
             }, status=status.HTTP_200_OK)
 
 
@@ -2362,7 +2644,11 @@ class LogoutView(APIView):
 # ==============================
 
 @api_view(["DELETE"])
+@authentication_classes([OriginCheckedSessionAuthentication])
+@permission_classes([IsAdminUser])
+@parser_classes([JSONParser])
 def clear_candidates(request):
+    """Delete every candidate document. Staff (Django admin) accounts only."""
     deleted = mongo_delete_all_candidates()
+    logger.warning(f"All candidates cleared by {request.user.username} ({deleted} deleted)")
     return Response({'deleted': deleted})
-    return Response({"message": "All candidates cleared"})
