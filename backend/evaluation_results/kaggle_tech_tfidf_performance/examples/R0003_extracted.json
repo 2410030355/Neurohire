@@ -1,0 +1,154 @@
+{
+  "name": "Data Science",
+  "email": null,
+  "phone": null,
+  "skills": [
+    "data analysis",
+    "data science",
+    "deep learning",
+    "django",
+    "flask",
+    "git",
+    "java",
+    "linux",
+    "machine learning",
+    "matlab",
+    "mysql",
+    "python",
+    "sql",
+    "system design"
+  ],
+  "other_skills": [],
+  "jd_skills": [
+    "angular",
+    "ci/cd",
+    "java",
+    "postgresql",
+    "rest api",
+    "spring boot",
+    "sql",
+    "tdd",
+    "typescript",
+    "uat",
+    "unit testing"
+  ],
+  "missing_skills": [
+    "angular",
+    "ci/cd",
+    "postgresql",
+    "rest api",
+    "spring boot",
+    "tdd",
+    "typescript",
+    "uat",
+    "unit testing"
+  ],
+  "experience_years": null,
+  "experience_years_dated": null,
+  "experience_years_claimed": null,
+  "experience_source": "none",
+  "employment_history": [],
+  "projects": [],
+  "education": "Bachelor's Degree",
+  "consistency_score": 100.0,
+  "consistency_flags": [],
+  "consistency_rules_skipped": [
+    "senior_skills_low_experience",
+    "skill_count_vs_experience"
+  ],
+  "skill_validation_score": 0.0,
+  "skill_validation_score_jd": 0.0,
+  "skill_validation_score_original": 0.0,
+  "jd_skills_evidenced": [],
+  "validated_skills": [
+    {
+      "skill": "data analysis",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "data science",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "deep learning",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "django",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "flask",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "git",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "java",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "linux",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "machine learning",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "matlab",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "mysql",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "python",
+      "status": "Partial",
+      "mentions": 6,
+      "evidence": null
+    },
+    {
+      "skill": "sql",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "system design",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    }
+  ],
+  "lv_raw": null,
+  "lv_new_skills": [],
+  "lv_span_years": null,
+  "lv_basis": "insufficient dated history",
+  "extraction_method": "regex"
+}

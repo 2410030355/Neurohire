@@ -480,12 +480,14 @@ def _fmt(v, suffix=''):
 
 
 def _build_explanation(scores, similarity, consistency, validated_skills, lv, has_jd,
-                       experience_years, experience_source) -> str:
+                       experience_years, experience_source, jd_skills=(), jd_skills_evidenced=()) -> str:
     """Component-level account of how FS was computed (not a validity claim)."""
     counts = {k: sum(1 for v in validated_skills if v['status'] == k) for k in ('Valid', 'Partial', 'Unverified')}
     method = {'gemini': 'Gemini embeddings', 'tfidf': 'TF-IDF fallback', 'none': 'not computed'}[similarity['method']]
     target = 'the job description' if has_jd else 'the target role'
-    if consistency['flags']:
+    if consistency.get('not_applicable'):
+        cs_detail = " - not applicable (no recognised skills to check)"
+    elif consistency['flags']:
         cs_detail = " - " + "; ".join(f['message'] for f in consistency['flags'])
     else:
         cs_detail = " - no rule triggered"
@@ -499,8 +501,14 @@ def _build_explanation(scores, similarity, consistency, validated_skills, lv, ha
     parts = [
         f"Semantic similarity (SS) to {target}: {_fmt(scores['semantic_score'])}/100 ({method}).",
         f"Consistency (CS): {_fmt(scores['consistency_score'])}/100{cs_detail}.",
-        f"Skill validation (VS): {_fmt(scores['skill_validation_score'])}/100 - "
-        f"{counts['Valid']} valid, {counts['Partial']} partial, {counts['Unverified']} unverified.",
+        (f"Skill evidence (VS): {_fmt(scores['skill_validation_score'])}/100 - "
+         f"{len(jd_skills_evidenced)} of {len(jd_skills)} skills named in {target} are backed by an "
+         f"action verb in the same sentence ({', '.join(jd_skills_evidenced) or 'none'})."
+         if scoring.VS_DEFINITION == 'jd' else
+         f"Skill validation (VS, original): {_fmt(scores['skill_validation_score'])}/100 - "
+         f"{counts['Valid']} valid, {counts['Partial']} partial, {counts['Unverified']} unverified.")
+        if jd_skills or scoring.VS_DEFINITION != 'jd' else
+        f"Skill evidence (VS): not available - {target} names no recognised skills.",
         lv_text,
         f"Analytical score (AS) = mean of {', '.join(scores['analytical_components']) or 'no components'}: "
         f"{_fmt(scores['analytical_score'])}/100.",
@@ -587,13 +595,18 @@ def analyze_text(text_original: str, target_role: str = "", job_description: str
 
     # ── CS: consistency (paper §IV.D.1) ─────────────────────────────
     consistency = compute_consistency(skills, years_for_rules)
+    jd_skills = extract_skills(match_target) if match_target else []
 
     # ── VS: skill validation (paper §IV.D.2) ────────────────────────
     validated_skills = validate_skills_from_text(skills, text_original, mode=vs_mode)
     # Line-bounded evidence for every skill: lets ranking compute the
     # JD-conditioned evidence score (scoring.compute_jd_evidence) for any JD.
     validated_skills_evidence = validate_skills_from_text(skills, text_original, mode='sentence')
-    vs = compute_skill_validation(validated_skills)
+    vs_original = compute_skill_validation(validated_skills)
+    vs_jd = scoring.compute_jd_evidence(validated_skills_evidence, jd_skills)
+    vs = vs_jd if scoring.VS_DEFINITION == 'jd' else vs_original
+    evidenced = {v['skill'] for v in validated_skills_evidence if v['status'] == 'Valid'}
+    jd_skills_evidenced = [s for s in jd_skills if s in evidenced]
 
     # ── LV: learning velocity (paper §IV.D.3) ───────────────────────
     lv = compute_learning_velocity(text_original, experience['positions'])
@@ -608,13 +621,12 @@ def analyze_text(text_original: str, target_role: str = "", job_description: str
     career_trajectory = generate_career_trajectory(
         skills, learning_velocity, experience_years if experience_known else None)
 
-    # Skills the JD asks for that the résumé does not mention
-    jd_skills = extract_skills(job_description) if has_jd else []
+    # Skills the JD (or target role) asks for that the résumé does not mention
     missing_skills = [s for s in jd_skills if s not in skills]
 
     explainability = _build_explanation(scores, similarity, consistency, validated_skills, lv,
                                         has_jd, experience_years if experience_known else None,
-                                        experience_source)
+                                        experience_source, jd_skills, jd_skills_evidenced)
 
     profile_summary = (
         f"{name or 'Candidate'} - {education or 'Education not specified'} | "
@@ -656,6 +668,10 @@ def analyze_text(text_original: str, target_role: str = "", job_description: str
         "consistency_flags": consistency['flags'],
         "consistency_rules_skipped": consistency['rules_skipped'],
         "skill_validation_score": vs,
+        "skill_validation_score_jd": vs_jd,
+        "skill_validation_score_original": vs_original,
+        "vs_definition": scoring.VS_DEFINITION,
+        "jd_skills_evidenced": jd_skills_evidenced,
         "skill_evidence_band": evidence_band(vs),
         "validated_skills": validated_skills,
         "validated_skills_evidence": validated_skills_evidence,

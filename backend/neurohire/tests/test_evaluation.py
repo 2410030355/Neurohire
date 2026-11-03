@@ -296,6 +296,37 @@ class MultiRoleBenchmarkTests(SimpleTestCase):
         with self.assertRaises(CommandError):
             call_command('import_resume_csv', csv=bad, out=os.path.join(self.dir, 'b2'), stdout=io.StringIO())
 
+    def test_manifest_restore_is_verified_and_tamper_writes_nothing(self):
+        from django.core.management.base import CommandError
+        out = os.path.join(self.dir, 'm')
+        call_command('import_resume_csv', csv=self.csv, out=out, write_manifest=True, stdout=io.StringIO())
+        manifest = json.load(open(os.path.join(out, 'resumes_manifest.json')))
+        self.assertEqual(manifest['resume_count'], 9)
+        shutil.rmtree(os.path.join(out, 'resumes'))
+        renamed = os.path.join(self.dir, 'in (1).csv')          # same bytes, browser-renamed
+        shutil.copy(self.csv, renamed)
+        msg = io.StringIO()
+        call_command('import_resume_csv', csv=renamed, out=out, stdout=msg)
+        self.assertIn('Verified', msg.getvalue())
+        self.assertEqual(json.load(open(os.path.join(out, 'import_report.json')))['source_csv'], 'in.csv')
+        self.assertEqual(len(os.listdir(os.path.join(out, 'resumes'))), 9)
+
+        tampered = os.path.join(self.dir, 'tampered.csv')
+        text = open(self.csv, encoding='utf-8').read().replace('Spring MVC', 'Spring WebFlux')
+        open(tampered, 'w', encoding='utf-8', newline='').write(text)
+        shutil.rmtree(os.path.join(out, 'resumes'))
+        with self.assertRaisesRegex(CommandError, 'nothing was written'):
+            call_command('import_resume_csv', csv=tampered, out=out, stdout=io.StringIO())
+        self.assertFalse(os.path.exists(os.path.join(out, 'resumes')))
+
+    def test_missing_resume_folder_explains_restore(self):
+        shutil.rmtree(os.path.join(self.ds, 'resumes'))
+        spec = json.load(open(os.path.join(self.ds, 'dataset.json')))
+        spec['source'] = {'dataset': 'x'}
+        json.dump(spec, open(os.path.join(self.ds, 'dataset.json'), 'w'))
+        with self.assertRaisesRegex(ValueError, 'import_resume_csv'):
+            load_dataset(self.ds, 'strict')
+
     def test_strict_and_lenient_labels(self):
         strict, lenient = load_dataset(self.ds, 'strict'), load_dataset(self.ds, 'lenient')
         self.assertEqual(sum(strict.jobs[0].labels.values()), 1)     # Python Developer only
@@ -347,3 +378,47 @@ class FastSkillExtractionTests(SimpleTestCase):
         a = extract_skills('React, Redux, Jest')
         a.append('mutated')
         self.assertNotIn('mutated', extract_skills('React, Redux, Jest'))
+
+
+class PerformanceReportCommandTests(SimpleTestCase):
+    def test_runs_on_frontend_12_and_handles_failures(self):
+        import json, os, tempfile
+        from django.core.management import call_command
+        root = os.path.join(os.path.dirname(__file__), '..', '..', 'evaluation_data', 'frontend_12')
+        with tempfile.TemporaryDirectory() as out:
+            call_command('performance_report', dataset=root, out=out, examples=1, stdout=open(os.devnull, 'w'))
+            res = json.load(open(os.path.join(out, 'performance.json')))
+            self.assertEqual(res['extraction']['n'], 12)
+            self.assertTrue(os.path.exists(os.path.join(out, 'examples', res['examples'][0] + '_extracted.json')))
+            outcomes = {c['case']: c for c in res['robustness']}
+            self.assertTrue(outcomes['Empty résumé']['outcome'].startswith('rejected'))
+            self.assertFalse(any(c['outcome'].startswith('ERROR') for c in res['robustness']))
+            self.assertEqual(outcomes['Gemini embedding API failure']['similarity_method'], 'tfidf')
+            self.assertEqual(outcomes['Gemini extraction API failure']['extraction_method'], 'regex')
+
+
+class KaggleTechManifestTests(SimpleTestCase):
+    """The committed manifest pins the exact 166 profiles; local files must match it when present."""
+    root = os.path.join(os.path.dirname(__file__), '..', '..', 'evaluation_data', 'kaggle_tech')
+
+    def test_manifest_covers_committed_metadata(self):
+        import hashlib
+        m = json.load(open(os.path.join(self.root, 'resumes_manifest.json')))
+        self.assertEqual(m['resume_count'], 166)
+        self.assertEqual(sum(k.startswith('resumes/') for k in m['files']), 166)
+        for rel in ('categories.csv', 'import_report.json'):
+            got = hashlib.sha256(open(os.path.join(self.root, rel), 'rb').read()).hexdigest()
+            self.assertEqual(got, m['files'][rel], rel)
+        ids = {row['id'] for row in csv.DictReader(open(os.path.join(self.root, 'categories.csv')))}
+        self.assertEqual(ids, {k[len('resumes/'):-4] for k in m['files'] if k.startswith('resumes/')})
+
+    def test_local_resumes_match_manifest(self):
+        import hashlib
+        res = os.path.join(self.root, 'resumes')
+        if not os.path.isdir(res):
+            self.skipTest('résumé texts not restored (run import_resume_csv)')
+        m = json.load(open(os.path.join(self.root, 'resumes_manifest.json')))
+        for name in sorted(os.listdir(res)):
+            got = hashlib.sha256(open(os.path.join(res, name), 'rb').read()).hexdigest()
+            self.assertEqual(got, m['files'].get(f'resumes/{name}'), name)
+        self.assertEqual(len(load_dataset(self.root, 'strict').resumes), 166)

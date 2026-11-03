@@ -1,0 +1,19 @@
+Rahul Mehta
+rahul.mehta@gmail.com  |  +91 76543 21098  |  Pune, Maharashtra
+PROFESSIONAL SUMMARY
+3 years of experience in React, JavaScript, and modern CSS. Passionate about responsive design and cross-browser compatibility.
+SKILLS
+React  •  JavaScript  •  HTML5  •  CSS3  •  Webpack  •  REST API  •  Bootstrap  •  Git
+WORK EXPERIENCE
+UI Developer  —  Persistent Systems  (2021 – Present)
+• Built and maintained 8 React single-page applications for enterprise clients
+• Implemented responsive UI using CSS Grid and Flexbox
+• Integrated third-party APIs using Axios and handled error boundaries in React
+Frontend Developer  —  Freelance  (2020 – 2021)
+• Developed e-commerce frontend with React and integrated payment gateway
+• Optimized Webpack config reducing build time by 25%
+PROJECTS
+E-commerce Platform Frontend: React + JavaScript SPA with cart, checkout, and product listing. Integrated Stripe payment.
+Portfolio Builder App: Drag-and-drop React app for creating professional portfolios. CSS animations and Webpack bundling.
+EDUCATION
+B.Sc. Computer Science — Pune University, 2020

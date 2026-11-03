@@ -1,0 +1,272 @@
+{
+  "name": "Data Science Assurance Associate",
+  "email": null,
+  "phone": null,
+  "skills": [
+    "angular",
+    "bootstrap",
+    "cassandra",
+    "computer vision",
+    "css",
+    "d3.js",
+    "data science",
+    "deep learning",
+    "docker",
+    "elasticsearch",
+    "elk",
+    "flask",
+    "git",
+    "html",
+    "java",
+    "javascript",
+    "jquery",
+    "kafka",
+    "machine learning",
+    "matplotlib",
+    "mysql",
+    "nlp",
+    "node.js",
+    "numpy",
+    "pandas",
+    "python",
+    "r",
+    "scikit-learn",
+    "scipy",
+    "sql",
+    "tableau"
+  ],
+  "other_skills": [],
+  "jd_skills": [
+    "angular",
+    "ci/cd",
+    "java",
+    "postgresql",
+    "rest api",
+    "spring boot",
+    "sql",
+    "tdd",
+    "typescript",
+    "uat",
+    "unit testing"
+  ],
+  "missing_skills": [
+    "ci/cd",
+    "postgresql",
+    "rest api",
+    "spring boot",
+    "tdd",
+    "typescript",
+    "uat",
+    "unit testing"
+  ],
+  "experience_years": null,
+  "experience_years_dated": null,
+  "experience_years_claimed": null,
+  "experience_source": "none",
+  "employment_history": [],
+  "projects": [],
+  "education": null,
+  "consistency_score": 100.0,
+  "consistency_flags": [],
+  "consistency_rules_skipped": [
+    "senior_skills_low_experience",
+    "skill_count_vs_experience"
+  ],
+  "skill_validation_score": 0.0,
+  "skill_validation_score_jd": 0.0,
+  "skill_validation_score_original": 0.0,
+  "jd_skills_evidenced": [],
+  "validated_skills": [
+    {
+      "skill": "angular",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "bootstrap",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "cassandra",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "computer vision",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "css",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "d3.js",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "data science",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    },
+    {
+      "skill": "deep learning",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "docker",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "elasticsearch",
+      "status": "Partial",
+      "mentions": 4,
+      "evidence": null
+    },
+    {
+      "skill": "elk",
+      "status": "Partial",
+      "mentions": 4,
+      "evidence": null
+    },
+    {
+      "skill": "flask",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "git",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "html",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "java",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "javascript",
+      "status": "Partial",
+      "mentions": 4,
+      "evidence": null
+    },
+    {
+      "skill": "jquery",
+      "status": "Partial",
+      "mentions": 4,
+      "evidence": null
+    },
+    {
+      "skill": "kafka",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "machine learning",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "matplotlib",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "mysql",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "nlp",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "node.js",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "numpy",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "pandas",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "python",
+      "status": "Partial",
+      "mentions": 6,
+      "evidence": null
+    },
+    {
+      "skill": "r",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "scikit-learn",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    },
+    {
+      "skill": "scipy",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "sql",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "tableau",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    }
+  ],
+  "lv_raw": null,
+  "lv_new_skills": [],
+  "lv_span_years": null,
+  "lv_basis": "insufficient dated history",
+  "extraction_method": "regex"
+}

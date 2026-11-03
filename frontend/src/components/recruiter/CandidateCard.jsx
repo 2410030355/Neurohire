@@ -75,6 +75,8 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
   };
 
   const hasValidated = safe.validated.length > 0;
+  // Stored by the app before FS/AS existed: its scores are not comparable.
+  const legacy = candidate?.final_score === undefined && candidate?.analytical_score === undefined;
 
   const handleSchedule = async () => {
     await logDecision(candidate, 'hire', rankingId);
@@ -148,7 +150,7 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
             </div>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <FitBadge level={safe.fit} />
+            {!legacy && <FitBadge level={safe.fit} />}
             {decided && (
               <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--nh-text-secondary)' }}>
                 {decided}
@@ -163,13 +165,15 @@ export default function CandidateCard({ candidate, onSchedule, onWaitlist, index
           <ScoreRing score={safe.final}       size={56} label="Final (FS)"  />
           <ScoreRing score={safe.roleMatch}   size={48} label="Semantic"    color="var(--nh-primary)" />
           <ScoreRing score={safe.consistency} size={48} label="Consistency" color="var(--nh-success)" />
-          <ScoreRing score={safe.skills}      size={48} label="Skill Val."  color="var(--nh-warning)" />
+          <ScoreRing score={safe.skills}      size={48} label="Evidence"    color="var(--nh-warning)" />
           <ScoreRing score={safe.lv}          size={48} label="Learning V." color="#9b7ec8" />
         </div>
-        <p className="text-[11px] mb-4" style={{ color: 'var(--nh-text-secondary)' }}>
-          Analytical (AS) {fmt(safe.analytical)}
-          {candidate?.missing_components?.length > 0 &&
-            ` · not available: ${candidate.missing_components.join(', ')}`}
+        <p className="text-[11px] mb-4" style={{ color: legacy ? 'var(--nh-warning)' : 'var(--nh-text-secondary)' }}>
+          {legacy
+            ? 'Scored by an earlier version of NeuroHire — re-upload, or rank in the Ranking tab, to get FS and AS.'
+            : <>Analytical (AS) {fmt(safe.analytical)}
+                {candidate?.missing_components?.length > 0 &&
+                  ` · not available: ${candidate.missing_components.join(', ')}`}</>}
         </p>
 
         {/* ── Top consistency warning (collapsed preview) ── */}

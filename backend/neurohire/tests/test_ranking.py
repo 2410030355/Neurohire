@@ -32,7 +32,7 @@ class RankCandidatesTests(SimpleTestCase):
 
     def test_orders_by_final_score(self):
         cands = [cand(1, 'A', cs=100, vs=0), cand(2, 'B', cs=100, vs=100), cand(3, 'C', cs=53, vs=0)]
-        out = rank_candidates(cands, 'react developer', fake_similarity([60, 60, 90]))
+        out = rank_candidates(cands, 'react developer', fake_similarity([60, 60, 90]), vs_variant='original')
         names = [r['name'] for r in out['results']]
         # FS: A = .6*60+.4*50 = 56, B = .6*60+.4*100 = 76, C = .6*90+.4*26.5 = 64.6
         self.assertEqual(names, ['B', 'C', 'A'])
@@ -40,12 +40,12 @@ class RankCandidatesTests(SimpleTestCase):
 
     def test_ties_broken_by_ss_then_name(self):
         cands = [cand(1, 'Zed'), cand(2, 'amy'), cand(3, 'Bob')]
-        out = rank_candidates(cands, 'jd text here', fake_similarity([50, 50, 50]))
+        out = rank_candidates(cands, 'jd text here', fake_similarity([50, 50, 50]), vs_variant='original')
         self.assertEqual([r['name'] for r in out['results']], ['amy', 'Bob', 'Zed'])
 
     def test_lv_normalised_over_the_ranked_set(self):
         cands = [cand(1, 'A', lv=0.5), cand(2, 'B', lv=1.5), cand(3, 'C', lv=1.0), cand(4, 'D', lv=None)]
-        out = rank_candidates(cands, 'jd', fake_similarity([50, 50, 50, 50]))
+        out = rank_candidates(cands, 'jd', fake_similarity([50, 50, 50, 50]), vs_variant='original')
         lv = {r['name']: r['lv_score'] for r in out['results']}
         self.assertEqual(lv, {'A': 0.0, 'B': 100.0, 'C': 50.0, 'D': None})
         self.assertEqual(out['lv_bounds'], {'min': 0.5, 'max': 1.5, 'n_with_lv': 3})
@@ -54,11 +54,11 @@ class RankCandidatesTests(SimpleTestCase):
 
     def test_ablation_components(self):
         c = [cand(1, 'A', cs=100, vs=0, lv=1.0)]
-        ss_only = rank_candidates(c, 'jd', fake_similarity([70]), components={'SS'})['results'][0]
+        ss_only = rank_candidates(c, 'jd', fake_similarity([70]), components={'SS'}, vs_variant='original')['results'][0]
         self.assertEqual(ss_only['final_score'], 70.0)
-        ss_cs = rank_candidates(c, 'jd', fake_similarity([70]), components={'SS', 'CS'})['results'][0]
+        ss_cs = rank_candidates(c, 'jd', fake_similarity([70]), components={'SS', 'CS'}, vs_variant='original')['results'][0]
         self.assertEqual(ss_cs['final_score'], round(0.6 * 70 + 0.4 * 100, 2))
-        full = rank_candidates(c, 'jd', fake_similarity([70]))['results'][0]
+        full = rank_candidates(c, 'jd', fake_similarity([70]), vs_variant='original')['results'][0]
         # single candidate: min == max → LV 0.5 → 50
         self.assertEqual(full['lv_score'], 50.0)
         self.assertEqual(full['analytical_score'], 50.0)
@@ -66,13 +66,13 @@ class RankCandidatesTests(SimpleTestCase):
     def test_matched_and_missing_skills(self):
         c = [cand(1, 'A', skills=['react', 'jest'])]
         out = rank_candidates(c, 'React, TypeScript and Jest', fake_similarity([50]),
-                              extract_skills_fn=lambda t: ['jest', 'react', 'typescript'])
+                              extract_skills_fn=lambda t: ['jest', 'react', 'typescript'], vs_variant='original')
         r = out['results'][0]
         self.assertEqual(r['matched_skills'], ['jest', 'react'])
         self.assertEqual(r['missing_skills'], ['typescript'])
 
     def test_unscorable_similarity_falls_back_to_as(self):
-        out = rank_candidates([cand(1, 'A', cs=80, vs=40)], 'jd', fake_similarity([None], 'none'))
+        out = rank_candidates([cand(1, 'A', cs=80, vs=40)], 'jd', fake_similarity([None], 'none'), vs_variant='original')
         r = out['results'][0]
         self.assertIsNone(r['semantic_score'])
         self.assertEqual(r['final_score'], 60.0)
@@ -291,7 +291,8 @@ class UploadStorageTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         c = Client()
         c.force_login(self.rec)
-        resp = c.post('/api/upload-resume/', {'resume': SimpleUploadedFile('cv.pdf', b'%PDF')}, HTTP_ORIGIN=TRUSTED)
+        resp = c.post('/api/upload-resume/', {'resume': SimpleUploadedFile('cv.pdf', b'%PDF'), 'target_role': 'Dev'},
+                      HTTP_ORIGIN=TRUSTED)
         self.assertEqual(resp.status_code, 201, resp.content)
         stored = ins.call_args[0][0]
         self.assertEqual(stored['resume_text_redacted'], 'react developer')
@@ -359,3 +360,30 @@ class CandidateStatusTests(TestCase):
         resp = Client().patch('/api/candidates/x/', json.dumps({'status': 'scheduled'}),
                               content_type='application/json', HTTP_ORIGIN=TRUSTED)
         self.assertEqual(resp.status_code, 403)
+
+
+
+class RevisedVSRankingTests(SimpleTestCase):
+    """Default VS = evidence for THIS job description's skills."""
+
+    def _c(self, i, name, evidenced):
+        return {'id': f'id{i}', 'name': name, 'text': 't', 'skills': ['react', 'java'],
+                'consistency_score': 100.0, 'skill_validation_score': 99.0, 'lv_raw': None,
+                'skill_validation_score_original': 10.0,
+                'validated_skills_evidence': [{'skill': s, 'status': 'Valid'} for s in evidenced]}
+
+    def test_vs_recomputed_for_each_jd(self):
+        cands = [self._c(1, 'React person', ['react']), self._c(2, 'Java person', ['java'])]
+        skills = lambda t: ['react'] if 'React' in t else ['java']
+        react = rank_candidates(cands, 'React role', fake_similarity([50, 50]), skills)
+        java = rank_candidates(cands, 'Java role', fake_similarity([50, 50]), skills)
+        self.assertEqual(react['results'][0]['name'], 'React person')
+        self.assertEqual(java['results'][0]['name'], 'Java person')
+        self.assertEqual(react['vs_variant'], 'jd')
+        self.assertEqual(react['results'][0]['skill_validation_score'], 100.0)
+
+    def test_original_variant_uses_stored_original_vs(self):
+        out = rank_candidates([self._c(1, 'A', ['react'])], 'React role', fake_similarity([50]),
+                              lambda t: ['react'], vs_variant='paper')          # alias
+        self.assertEqual(out['vs_variant'], 'original')
+        self.assertEqual(out['results'][0]['skill_validation_score'], 10.0)

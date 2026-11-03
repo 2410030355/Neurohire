@@ -1,0 +1,164 @@
+{
+  "name": "Priya Venkataraman",
+  "email": "priya.v@outlook.com",
+  "phone": "+91 87654 32109",
+  "skills": [
+    "docker",
+    "hibernate",
+    "java",
+    "junit",
+    "kafka",
+    "kubernetes",
+    "maven",
+    "microservices",
+    "mysql",
+    "rest api",
+    "spring boot",
+    "unit testing"
+  ],
+  "other_skills": [],
+  "jd_skills": [
+    "ci/cd",
+    "css",
+    "cypress",
+    "graphql",
+    "javascript",
+    "jest",
+    "react",
+    "redux",
+    "responsive design",
+    "rest api",
+    "typescript",
+    "vue"
+  ],
+  "missing_skills": [
+    "ci/cd",
+    "css",
+    "cypress",
+    "graphql",
+    "javascript",
+    "jest",
+    "react",
+    "redux",
+    "responsive design",
+    "typescript",
+    "vue"
+  ],
+  "experience_years": 4.9,
+  "experience_years_dated": 4.9,
+  "experience_years_claimed": 5.0,
+  "experience_source": "dated",
+  "employment_history": [
+    {
+      "title": "Senior Backend Engineer TCS",
+      "start": "2020-07",
+      "end": "2023-05",
+      "months": 35,
+      "section": "work",
+      "line": 7
+    },
+    {
+      "title": "Java Developer Wipro",
+      "start": "2018-07",
+      "end": "2020-06",
+      "months": 24,
+      "section": "work",
+      "line": 11
+    }
+  ],
+  "projects": [],
+  "education": "Bachelor's Degree",
+  "consistency_score": 100.0,
+  "consistency_flags": [],
+  "consistency_rules_skipped": [],
+  "skill_validation_score": 8.33,
+  "skill_validation_score_jd": 8.33,
+  "skill_validation_score_original": 8.33,
+  "jd_skills_evidenced": [
+    "rest api"
+  ],
+  "validated_skills": [
+    {
+      "skill": "docker",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "hibernate",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "java",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    },
+    {
+      "skill": "junit",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "kafka",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    },
+    {
+      "skill": "kubernetes",
+      "status": "Valid",
+      "mentions": 1,
+      "evidence": "nd built 12 microservices using Spring Boot and deployed on Kubernetes • Optimized MySQL queries reducing response time by 35% • I"
+    },
+    {
+      "skill": "maven",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "microservices",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "mysql",
+      "status": "Partial",
+      "mentions": 4,
+      "evidence": null
+    },
+    {
+      "skill": "rest api",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    },
+    {
+      "skill": "spring boot",
+      "status": "Partial",
+      "mentions": 10,
+      "evidence": null
+    },
+    {
+      "skill": "unit testing",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    }
+  ],
+  "lv_raw": 0.8136,
+  "lv_new_skills": [
+    "kafka",
+    "kubernetes",
+    "microservices",
+    "mysql"
+  ],
+  "lv_span_years": 4.92,
+  "lv_basis": "2 dated positions",
+  "extraction_method": "regex"
+}

@@ -22,19 +22,23 @@ def rank_candidates(candidates: List[Dict], job_description: str,
                     similarity_batch_fn: Callable[[List[str], str, List[Optional[dict]]], Dict],
                     extract_skills_fn: Optional[Callable[[str], List[str]]] = None,
                     w_ss: Optional[float] = None, w_as: Optional[float] = None,
-                    components: Optional[set] = None, vs_variant: str = 'paper') -> Dict:
+                    components: Optional[set] = None, vs_variant: Optional[str] = None) -> Dict:
     """
     candidates: dicts with keys
         id, name, text (redacted résumé text), skills,
         consistency_score, skill_validation_score, lv_raw,
         embedding_cache (optional; passed through to similarity_batch_fn)
     components: which of {'SS','CS','VS','LV'} to use (ablation). Default all.
-    vs_variant: 'paper' = stored VS (§IV.D.2); 'jd' = JD-conditioned evidence
-                (scoring.compute_jd_evidence; needs validated_skills_evidence).
+    vs_variant: 'jd' (default, scoring.VS_DEFINITION) = JD-conditioned evidence
+                computed for THIS job description from validated_skills_evidence;
+                'original' = the first formulation's VS as stored
+                (skill_validation_score_original). 'paper' is accepted as 'original'.
     Returns {'results': [...ranked...], 'method': str, 'lv_bounds': {...},
              'weights': {...}, 'new_embeddings': [...aligned with input...]}
     """
     components = set(components or {'SS', 'CS', 'VS', 'LV'})
+    vs_variant = (vs_variant or scoring.VS_DEFINITION)
+    vs_variant = 'original' if vs_variant == 'paper' else vs_variant
     texts = [c.get('text') or '' for c in candidates]
     caches = [c.get('embedding_cache') for c in candidates]
     sim = similarity_batch_fn(texts, job_description, caches)
@@ -56,7 +60,7 @@ def rank_candidates(candidates: List[Dict], job_description: str,
         elif vs_variant == 'jd':
             vs = scoring.compute_jd_evidence(c.get('validated_skills_evidence') or [], jd_skills)
         else:
-            vs = c.get('skill_validation_score')
+            vs = c.get('skill_validation_score_original', c.get('skill_validation_score'))
         raw = lv_raw[i] if 'LV' in components else None
         norm = lv_norm[i] if 'LV' in components else None
         s = scoring.score_candidate(ss, cs, vs, raw, w_ss=w_ss, w_as=w_as, lv_norm=norm)

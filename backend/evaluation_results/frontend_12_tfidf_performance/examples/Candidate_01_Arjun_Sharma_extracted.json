@@ -1,0 +1,160 @@
+{
+  "name": "Arjun Sharma",
+  "email": "arjun.sharma@gmail.com",
+  "phone": "+91 98765 43210",
+  "skills": [
+    "aws",
+    "css",
+    "git",
+    "jest",
+    "node.js",
+    "react",
+    "redux",
+    "rest api",
+    "storybook",
+    "typescript",
+    "webpack",
+    "websockets"
+  ],
+  "other_skills": [],
+  "jd_skills": [
+    "ci/cd",
+    "css",
+    "cypress",
+    "graphql",
+    "javascript",
+    "jest",
+    "react",
+    "redux",
+    "responsive design",
+    "rest api",
+    "typescript",
+    "vue"
+  ],
+  "missing_skills": [
+    "ci/cd",
+    "cypress",
+    "graphql",
+    "javascript",
+    "responsive design",
+    "vue"
+  ],
+  "experience_years": 3.9,
+  "experience_years_dated": 3.9,
+  "experience_years_claimed": 4.0,
+  "experience_source": "dated",
+  "employment_history": [
+    {
+      "title": "Frontend Engineer Razorpay",
+      "start": "2021-07",
+      "end": "2023-05",
+      "months": 23,
+      "section": "work",
+      "line": 7
+    },
+    {
+      "title": "Junior Frontend Dev Infosys",
+      "start": "2019-07",
+      "end": "2021-06",
+      "months": 24,
+      "section": "work",
+      "line": 11
+    }
+  ],
+  "projects": [],
+  "education": "Bachelor's Degree",
+  "consistency_score": 100.0,
+  "consistency_flags": [],
+  "consistency_rules_skipped": [],
+  "skill_validation_score": 41.67,
+  "skill_validation_score_jd": 41.67,
+  "skill_validation_score_original": 50.0,
+  "jd_skills_evidenced": [
+    "css",
+    "react",
+    "redux",
+    "rest api",
+    "typescript"
+  ],
+  "validated_skills": [
+    {
+      "skill": "aws",
+      "status": "Valid",
+      "mentions": 1,
+      "evidence": "ipt, and WebSocket for live data visualization. Deployed on AWS. Component Design System: Developed and published an npm li"
+    },
+    {
+      "skill": "css",
+      "status": "Partial",
+      "mentions": 2,
+      "evidence": null
+    },
+    {
+      "skill": "git",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "jest",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "node.js",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "react",
+      "status": "Valid",
+      "mentions": 6,
+      "evidence": "ROFESSIONAL SUMMARY 4 years of experience building scalable React applications with TypeScript and Redux. Strong background i"
+    },
+    {
+      "skill": "redux",
+      "status": "Valid",
+      "mentions": 4,
+      "evidence": "ce building scalable React applications with TypeScript and Redux. Strong background in component architecture and performanc"
+    },
+    {
+      "skill": "rest api",
+      "status": "Valid",
+      "mentions": 1,
+      "evidence": "component library using React and CSS Modules • Integrated REST APIs with Axios and handled async state with Redux Thunk PROJECT"
+    },
+    {
+      "skill": "storybook",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "typescript",
+      "status": "Valid",
+      "mentions": 4,
+      "evidence": "ars of experience building scalable React applications with TypeScript and Redux. Strong background in component architecture and"
+    },
+    {
+      "skill": "webpack",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "websockets",
+      "status": "Valid",
+      "mentions": 1,
+      "evidence": "time Analytics Dashboard: Built with React, TypeScript, and WebSocket for live data visualization. Deployed on AWS. Component Des"
+    }
+  ],
+  "lv_raw": 0.2553,
+  "lv_new_skills": [
+    "typescript"
+  ],
+  "lv_span_years": 3.92,
+  "lv_basis": "2 dated positions",
+  "extraction_method": "regex"
+}

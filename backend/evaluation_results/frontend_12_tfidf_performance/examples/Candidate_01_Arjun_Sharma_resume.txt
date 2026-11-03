@@ -1,0 +1,19 @@
+Arjun Sharma
+arjun.sharma@gmail.com  |  +91 98765 43210  |  Bengaluru, Karnataka
+PROFESSIONAL SUMMARY
+4 years of experience building scalable React applications with TypeScript and Redux. Strong background in component architecture and performance optimization.
+SKILLS
+React  •  TypeScript  •  Node.js  •  CSS  •  Redux  •  Webpack  •  Jest  •  Git
+WORK EXPERIENCE
+Frontend Engineer  —  Razorpay  (2021 – Present)
+• Built payment dashboard with React and TypeScript serving 2M+ daily users
+• Reduced bundle size by 40% using code splitting and lazy loading
+• Implemented Redux state management for complex checkout flows
+Junior Frontend Dev  —  Infosys  (2019 – 2021)
+• Developed reusable component library using React and CSS Modules
+• Integrated REST APIs with Axios and handled async state with Redux Thunk
+PROJECTS
+Real-time Analytics Dashboard: Built with React, TypeScript, and WebSocket for live data visualization. Deployed on AWS.
+Component Design System: Developed and published an npm library of 40+ reusable React components with Storybook documentation.
+EDUCATION
+B.Tech Computer Science — VIT Vellore, 2019

@@ -13,8 +13,8 @@
 | seed | `42` |
 | stuffing sample (non-relevant résumés per job) | `all` |
 | fairness sample (résumés per job) | `all` |
-| code version | `7a4a68c` |
-| run at | `2026-11-03 14:14 UTC` |
+| code version | `d29a7a7` |
+| run at | `2026-11-03 14:51 UTC` |
 
 12 constructed résumés (not real people) for one Frontend Developer role: 7 frontend (React/Vue) labelled relevant, 5 non-frontend (Java backend, Python data, PHP, Android, junior UI) labelled not relevant. Labels were assigned by the authors and are stored in each file's 'Ground Truth Label' line, which is removed before any scoring.
 
@@ -38,8 +38,8 @@
 | NeuroHire: SS+CS | 1.00 | 0.71 | 1.00 | 0.98 [0.91, 1.00] | 0.86 | 1.00 | 0.97 [0.83, 1.00] | 0 |
 | NeuroHire: SS+CS+VS | 1.00 | 0.71 | 1.00 | 1.00 [1.00, 1.00] | 1.00 | 1.00 | 1.00 [1.00, 1.00] | 0 |
 | NeuroHire: full (SS+CS+VS+LV) | 1.00 | 0.71 | 1.00 | 0.98 [0.91, 1.00] | 0.86 | 1.00 | 0.97 [0.83, 1.00] | 0 |
-| NeuroHire-E: SS+VS_JD | 1.00 | 0.71 | 1.00 | 1.00 [1.00, 1.00] | 1.00 | 1.00 | 1.00 [1.00, 1.00] | 0 |
-| NeuroHire-E: full, JD-conditioned evidence | 1.00 | 0.71 | 1.00 | 0.98 [0.91, 1.00] | 0.86 | 1.00 | 0.97 [0.83, 1.00] | 0 |
+| Original formulation: SS+CS+VS | 1.00 | 0.71 | 1.00 | 1.00 [1.00, 1.00] | 1.00 | 1.00 | 1.00 [1.00, 1.00] | 0 |
+| Original formulation: full | 1.00 | 0.71 | 1.00 | 0.98 [0.91, 1.00] | 0.86 | 1.00 | 0.97 [0.83, 1.00] | 0 |
 
 Ties are resolved by averaging over random tie-breaks (not input order).
 
@@ -55,35 +55,36 @@ Ties are resolved by averaging over random tie-breaks (not input order).
 | NeuroHire: SS+CS | -0.018 [-0.09, 0.00] (p=1.000) | -0.006 [-0.13, 0.00] (p=1.000) | -0.029 [-0.17, 0.00] (p=1.000) |
 | NeuroHire: SS+CS+VS | 0.000 [0.00, 0.00] (p=1.000) | 0.000 [0.00, 0.00] (p=1.000) | 0.000 [0.00, 0.00] (p=1.000) |
 | NeuroHire: full (SS+CS+VS+LV) | -0.017 [-0.09, 0.00] (p=1.000) | -0.007 [-0.13, 0.00] (p=1.000) | -0.028 [-0.17, 0.00] (p=1.000) |
-| NeuroHire-E: SS+VS_JD | 0.000 [0.00, 0.00] (p=1.000) | 0.000 [0.00, 0.00] (p=1.000) | 0.000 [0.00, 0.00] (p=1.000) |
-| NeuroHire-E: full, JD-conditioned evidence | -0.017 [-0.09, 0.00] (p=1.000) | -0.007 [-0.13, 0.00] (p=1.000) | -0.028 [-0.17, 0.00] (p=1.000) |
+| Original formulation: SS+CS+VS | 0.000 [0.00, 0.00] (p=1.000) | 0.000 [0.00, 0.00] (p=1.000) | 0.000 [0.00, 0.00] (p=1.000) |
+| Original formulation: full | -0.017 [-0.09, 0.00] (p=1.000) | -0.007 [-0.13, 0.00] (p=1.000) | -0.028 [-0.17, 0.00] (p=1.000) |
 
 Δ = method − keyword baseline on the same bootstrap replicate; p is a two-sided bootstrap p-value.
 
 ### 3. FS weight sensitivity (full model)
 
-| w_SS | w_AS | AP | NDCG@5 | AUC | AP (E) | NDCG@5 (E) | AUC (E) |
+| w_SS | w_AS | AP | NDCG@5 | AUC | AP (orig.) | NDCG@5 (orig.) | AUC (orig.) |
 |---|---|---|---|---|---|---|---|
-| 0.0 | 1.0 | 0.90 | 1.00 | 0.79 | 0.89 | 0.87 | 0.80 |
-| 0.1 | 0.9 | 0.92 | 1.00 | 0.83 | 0.89 | 0.87 | 0.80 |
-| 0.2 | 0.8 | 0.93 | 1.00 | 0.86 | 0.90 | 0.87 | 0.83 |
-| 0.3 | 0.7 | 0.93 | 1.00 | 0.86 | 0.94 | 1.00 | 0.89 |
-| 0.4 | 0.6 | 0.94 | 1.00 | 0.89 | 0.96 | 1.00 | 0.94 |
-| 0.5 | 0.5 | 0.97 | 1.00 | 0.94 | 0.96 | 1.00 | 0.94 |
+| 0.0 | 1.0 | 0.89 | 0.87 | 0.80 | 0.90 | 1.00 | 0.79 |
+| 0.1 | 0.9 | 0.89 | 0.87 | 0.80 | 0.92 | 1.00 | 0.83 |
+| 0.2 | 0.8 | 0.90 | 0.87 | 0.83 | 0.93 | 1.00 | 0.86 |
+| 0.3 | 0.7 | 0.94 | 1.00 | 0.89 | 0.93 | 1.00 | 0.86 |
+| 0.4 | 0.6 | 0.96 | 1.00 | 0.94 | 0.94 | 1.00 | 0.89 |
+| 0.5 | 0.5 | 0.96 | 1.00 | 0.94 | 0.97 | 1.00 | 0.94 |
 | 0.6 | 0.4 | 0.98 | 1.00 | 0.97 | 0.98 | 1.00 | 0.97 |
 | 0.7 | 0.3 | 0.98 | 1.00 | 0.97 | 0.98 | 1.00 | 0.97 |
 | 0.8 | 0.2 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
 | 0.9 | 0.1 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
 | 1.0 | 0.0 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
 
-(E) = NeuroHire-E, JD-conditioned evidence in place of VS.
+(orig.) = original formulation of VS and CS.
 
-### 4. Skill-evidence rule: first mention (paper) vs any mention
+### 4. Skill-evidence (VS) definition
 
 | VS rule | mean VS | AP | NDCG@5 | AUC |
 |---|---|---|---|---|
-| first-mention (paper) | 34.1 | 0.98 | 1.00 | 0.97 |
-| any-mention | 77.2 | 0.95 | 1.00 | 0.91 |
+| JD-conditioned evidence (revised) | 27.1 | 0.98 | 1.00 | 0.97 |
+| original: all skills, first mention | 34.1 | 0.98 | 1.00 | 0.97 |
+| original: all skills, any mention | 77.2 | 0.95 | 1.00 | 0.91 |
 
 ### 5. Keyword-stuffing robustness
 
@@ -98,10 +99,10 @@ Ties are resolved by averaging over random tie-breaks (not input order).
 | TF-IDF (pairwise) only | 0.95 | 1.00 | 1.00 | 0.96 | 0 | 5.6 | 132.3 |
 | NeuroHire: SS only | 0.95 | 1.00 | 1.00 | 0.96 | 0 | 5.6 | 132.3 |
 | NeuroHire: SS+CS | 0.95 | 1.00 | 1.00 | 0.94 | 0 | 3.4 | 4.6 |
-| NeuroHire: SS+CS+VS | 1.00 | 1.00 | 1.00 | 1.00 | 0 | 3.4 | 11.1 |
-| NeuroHire: full (SS+CS+VS+LV) | 0.94 | 1.00 | 1.00 | 0.94 | 0 | 2.6 | 15.2 |
-| NeuroHire-E: SS+VS_JD | 1.00 | 1.00 | 1.00 | 1.00 | 0 | 3.8 | 71.3 |
-| NeuroHire-E: full, JD-conditioned evidence | 0.95 | 1.00 | 1.00 | 0.96 | 0 | 2.8 | 18.6 |
+| NeuroHire: SS+CS+VS | 0.98 | 1.00 | 1.00 | 0.99 | 0 | 3.6 | 14.9 |
+| NeuroHire: full (SS+CS+VS+LV) | 0.95 | 1.00 | 1.00 | 0.96 | 0 | 2.8 | 18.6 |
+| Original formulation: SS+CS+VS | 1.00 | 1.00 | 1.00 | 1.00 | 0 | 3.4 | 11.1 |
+| Original formulation: full | 0.94 | 1.00 | 1.00 | 0.94 | 0 | 2.6 | 15.2 |
 
 Stuffed pool, 95% CIs and paired difference vs *NeuroHire: SS only* (does evidence add robustness beyond semantic similarity?):
 
@@ -114,10 +115,10 @@ Stuffed pool, 95% CIs and paired difference vs *NeuroHire: SS only* (does eviden
 | TF-IDF (pairwise) only | 0.95 [0.83, 1.00] | 0.000 [0.00, 0.00] (p=1.000) |
 | NeuroHire: SS only | 0.95 [0.83, 1.00] | (reference) |
 | NeuroHire: SS+CS | 0.95 [0.80, 1.00] | -0.002 [-0.10, 0.09] (p=1.000) |
-| NeuroHire: SS+CS+VS | 1.00 [1.00, 1.00] | 0.050 [0.00, 0.17] (p=0.512) |
-| NeuroHire: full (SS+CS+VS+LV) | 0.94 [0.79, 1.00] | -0.013 [-0.14, 0.11] (p=0.928) |
-| NeuroHire-E: SS+VS_JD | 1.00 [1.00, 1.00] | 0.050 [0.00, 0.17] (p=0.512) |
-| NeuroHire-E: full, JD-conditioned evidence | 0.95 [0.82, 1.00] | -0.002 [-0.11, 0.12] (p=1.000) |
+| NeuroHire: SS+CS+VS | 0.98 [0.91, 1.00] | 0.032 [0.00, 0.12] (p=0.645) |
+| NeuroHire: full (SS+CS+VS+LV) | 0.95 [0.82, 1.00] | -0.002 [-0.11, 0.12] (p=1.000) |
+| Original formulation: SS+CS+VS | 1.00 [1.00, 1.00] | 0.050 [0.00, 0.17] (p=0.512) |
+| Original formulation: full | 0.94 [0.79, 1.00] | -0.013 [-0.14, 0.11] (p=0.928) |
 
 ### 6. Counterfactual fairness (name swaps)
 
@@ -134,18 +135,18 @@ Leaving the "Ground Truth Label" line in the text changes SS by 1.75 points on a
 
 ### 8. Per-candidate scores (full model)
 
-| Candidate | label | rank | FS | SS | CS | VS | LV | AS | VS_JD | rank (E) | FS (E) | yrs (dates) | yrs (claimed) | #skills |
+| Candidate | label | rank | FS | SS | CS | VS | LV | AS | VS (orig.) | rank (orig.) | FS (orig.) | yrs (dates) | yrs (claimed) | #skills |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Candidate_10_Ananya_Gupta | 1 | 1 | 55.4 | 33.9 | 100 | 92.3 | 70.8 | 87.7 | 50.0 | 2 | 49.8 | 5.9 | 6.0 | 13 |
-| Candidate_06_Divya_Krishnan | 1 | 2 | 53.3 | 31.9 | 100 | 66.7 | 89.2 | 85.3 | 50.0 | 1 | 51.1 | 4.9 | 5.0 | 12 |
-| Candidate_04_Sneha_Pillai | 1 | 3 | 48.8 | 26.2 | 100 | 70.0 | 78.0 | 82.7 | 33.3 | 4 | 43.9 | 3.9 | 4.0 | 10 |
-| Candidate_12_Kavya_Reddy | 1 | 4 | 48.0 | 37.7 | 100 | 57.1 | 32.9 | 63.3 | 41.7 | 3 | 45.9 | 2.9 | 3.0 | 7 |
-| Candidate_08_Pooja_Nair | 1 | 5 | 41.2 | 18.6 | 88 | 37.5 | 100.0 | 75.2 | 33.3 | 5 | 40.7 | 1.9 | 2.0 | 8 |
-| Candidate_01_Arjun_Sharma | 1 | 6 | 36.2 | 27.0 | 100 | 50.0 | 0.0 | 50.0 | 41.7 | 6 | 35.1 | 3.9 | 4.0 | 12 |
-| Candidate_07_Arun_Balasubramanian | 0 | 7 | 32.5 | 13.1 | 100 | 0.0 | 85.2 | 61.7 | 16.7 | 7 | 34.8 | 2.9 | 3.0 | 8 |
-| Candidate_03_Rahul_Mehta | 1 | 8 | 27.9 | 22.8 | 100 | 0.0 | 6.7 | 35.6 | 25.0 | 8 | 31.2 | 2.9 | 3.0 | 9 |
+| Candidate_06_Divya_Krishnan | 1 | 1 | 51.1 | 31.9 | 100 | 50.0 | 89.2 | 79.7 | 66.7 | 2 | 53.3 | 4.9 | 5.0 | 12 |
+| Candidate_10_Ananya_Gupta | 1 | 2 | 49.8 | 33.9 | 100 | 50.0 | 70.8 | 73.6 | 92.3 | 1 | 55.4 | 5.9 | 6.0 | 13 |
+| Candidate_12_Kavya_Reddy | 1 | 3 | 45.9 | 37.7 | 100 | 41.7 | 32.9 | 58.2 | 57.1 | 4 | 48.0 | 2.9 | 3.0 | 7 |
+| Candidate_04_Sneha_Pillai | 1 | 4 | 43.9 | 26.2 | 100 | 33.3 | 78.0 | 70.4 | 70.0 | 3 | 48.8 | 3.9 | 4.0 | 10 |
+| Candidate_08_Pooja_Nair | 1 | 5 | 40.7 | 18.6 | 88 | 33.3 | 100.0 | 73.8 | 37.5 | 5 | 41.2 | 1.9 | 2.0 | 8 |
+| Candidate_01_Arjun_Sharma | 1 | 6 | 35.1 | 27.0 | 100 | 41.7 | 0.0 | 47.2 | 50.0 | 6 | 36.2 | 3.9 | 4.0 | 12 |
+| Candidate_07_Arun_Balasubramanian | 0 | 7 | 34.8 | 13.1 | 100 | 16.7 | 85.2 | 67.3 | 0.0 | 7 | 32.5 | 2.9 | 3.0 | 8 |
+| Candidate_03_Rahul_Mehta | 1 | 8 | 31.2 | 22.8 | 100 | 25.0 | 6.7 | 43.9 | 0.0 | 8 | 27.9 | 2.9 | 3.0 | 9 |
 | Candidate_02_Priya_Venkataraman | 0 | 9 | 25.4 | 8.8 | 100 | 8.3 | 42.6 | 50.3 | 8.3 | 9 | 25.4 | 4.9 | 5.0 | 12 |
-| Candidate_11_Manoj_Kumar | 0 | 10 | 23.7 | 6.1 | 100 | 0.0 | — | 50.0 | 8.3 | 10 | 25.3 | — | 1.0 | 6 |
-| Candidate_05_Karthik_Reddy | 0 | 11 | 21.3 | 6.5 | 100 | 11.1 | 19.2 | 43.4 | 8.3 | 11 | 20.9 | 5.9 | 6.0 | 9 |
-| Candidate_09_Suresh_Babu | 0 | 12 | 18.9 | 5.5 | 100 | 16.7 | 0.0 | 38.9 | 8.3 | 12 | 17.8 | 3.9 | 4.0 | 6 |
+| Candidate_11_Manoj_Kumar | 0 | 10 | 25.3 | 6.1 | 100 | 8.3 | — | 54.2 | 0.0 | 10 | 23.7 | — | 1.0 | 6 |
+| Candidate_05_Karthik_Reddy | 0 | 11 | 20.9 | 6.5 | 100 | 8.3 | 19.2 | 42.5 | 11.1 | 11 | 21.3 | 5.9 | 6.0 | 9 |
+| Candidate_09_Suresh_Babu | 0 | 12 | 17.8 | 5.5 | 100 | 8.3 | 0.0 | 36.1 | 16.7 | 12 | 18.9 | 3.9 | 4.0 | 6 |
 

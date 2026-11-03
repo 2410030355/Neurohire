@@ -29,6 +29,8 @@ from .baselines import SIMILARITY_BACKENDS, baseline_scorers
 from .data import Dataset, Job
 from .perturb import COUNTERFACTUAL_NAMES, display_names, identity_variants, skill_stuff
 
+# Revised method (default in the app): VS = JD-conditioned evidence,
+# CS not applicable when no skills are recognised.
 ABLATIONS = [
     ('NeuroHire: SS only', {'SS'}),
     ('NeuroHire: SS+CS', {'SS', 'CS'}),
@@ -36,10 +38,12 @@ ABLATIONS = [
     ('NeuroHire: full (SS+CS+VS+LV)', {'SS', 'CS', 'VS', 'LV'}),
 ]
 FULL = 'NeuroHire: full (SS+CS+VS+LV)'
-FULL_JD = 'NeuroHire-E: full, JD-conditioned evidence'
-JD_ABLATIONS = [
-    ('NeuroHire-E: SS+VS_JD', {'SS', 'VS'}),
-    (FULL_JD, {'SS', 'CS', 'VS', 'LV'}),
+# First formulation, for comparison: VS over all listed skills (first-mention
+# window) and CS = 100 for profiles with no recognised skills.
+FULL_ORIG = 'Original formulation: full'
+ORIGINAL_ABLATIONS = [
+    ('Original formulation: SS+CS+VS', {'SS', 'CS', 'VS'}),
+    (FULL_ORIG, {'SS', 'CS', 'VS', 'LV'}),
 ]
 REFERENCE = 'Keyword (skill overlap)'
 
@@ -92,15 +96,22 @@ def analyze_pool(texts: Dict[str, str], job: Job, ref: Optional[date], vs_mode='
             for rid, text in texts.items()}
 
 
-def to_candidates(analyses: Dict[str, Dict]) -> List[Dict]:
-    return [{'id': rid, 'name': rid, 'text': a['resume_text_redacted'], 'skills': a['skills'],
-             'experience_years': a['experience_years'], 'consistency_score': a['consistency_score'],
-             'skill_validation_score': a['skill_validation_score'], 'lv_raw': a['lv_raw'],
-             'validated_skills_evidence': a['validated_skills_evidence']}
-            for rid, a in analyses.items()]
+def to_candidates(analyses: Dict[str, Dict], original: bool = False) -> List[Dict]:
+    """original=True reproduces the first formulation's CS (100 when no skills)."""
+    out = []
+    for rid, a in analyses.items():
+        cs = a['consistency_score']
+        if original and cs is None and not a['skills']:
+            cs = 100.0
+        out.append({'id': rid, 'name': rid, 'text': a['resume_text_redacted'], 'skills': a['skills'],
+                    'experience_years': a['experience_years'], 'consistency_score': cs,
+                    'skill_validation_score': a['skill_validation_score'],
+                    'skill_validation_score_original': a['skill_validation_score_original'],
+                    'lv_raw': a['lv_raw'], 'validated_skills_evidence': a['validated_skills_evidence']})
+    return out
 
 
-def nh_scores(cands: List[Dict], jd: str, sim, components, w_ss=None, vs_variant='paper') -> Dict[str, Dict]:
+def nh_scores(cands: List[Dict], jd: str, sim, components, w_ss=None, vs_variant='jd') -> Dict[str, Dict]:
     w_as = None if w_ss is None else 1.0 - w_ss
     ranked = rank_candidates(cands, jd, sim, extract_skills, w_ss=w_ss, w_as=w_as, components=components,
                              vs_variant=vs_variant)
@@ -123,7 +134,8 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
     progress(f'[{job.id}] analysing {len(ids)} résumés')
     pool = analyze_pool(texts, job, ref, 'first', True, gemini_extraction)
     pool_any = analyze_pool(texts, job, ref, 'any', True, gemini_extraction)
-    cands, cands_any = to_candidates(pool), to_candidates(pool_any)
+    cands, cands_any = to_candidates(pool), to_candidates(pool_any, original=True)
+    cands_orig = to_candidates(pool, original=True)
     redacted = [pool[i]['resume_text_redacted'] for i in ids]
 
     # ── 1. main comparison ────────────────────────────────────────────────
@@ -136,8 +148,8 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
         res = nh_scores(cands, job.jd, sim, comps)
         nh_detail[name] = res
         method_scores[name] = _vector({i: res[i]['final_score'] for i in ids}, ids)
-    for name, comps in JD_ABLATIONS:
-        res = nh_scores(cands, job.jd, sim, comps, vs_variant='jd')
+    for name, comps in ORIGINAL_ABLATIONS:
+        res = nh_scores(cands_orig, job.jd, sim, comps, vs_variant='original')
         nh_detail[name] = res
         method_scores[name] = _vector({i: res[i]['final_score'] for i in ids}, ids)
 
@@ -152,23 +164,30 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
     weights = []
     for w in np.round(np.arange(0, 1.0001, 0.1), 2):
         row = {'w_ss': float(w), 'w_as': round(1 - float(w), 2)}
-        for tag, variant in (('', 'paper'), ('E_', 'jd')):
-            res = nh_scores(cands, job.jd, sim, {'SS', 'CS', 'VS', 'LV'}, w_ss=float(w), vs_variant=variant)
+        for tag, variant, cs_ in (('', 'jd', cands), ('O_', 'original', cands_orig)):
+            res = nh_scores(cs_, job.jd, sim, {'SS', 'CS', 'VS', 'LV'}, w_ss=float(w), vs_variant=variant)
             sc = _vector({i: res[i]['final_score'] for i in ids}, ids)
             e = M.evaluate_scores(sc, labels, k=k, seed=seed)
             row.update({f'{tag}{x}': e[x] for x in ('AP', f'NDCG@{k}', f'P@{k}', 'AUC')})
         weights.append(row)
 
-    # ── 3. evidence: VS first vs any mention ──────────────────────────────
-    res_any = nh_scores(cands_any, job.jd, sim, {'SS', 'CS', 'VS', 'LV'})
+    # ── 3. evidence: which VS definition ──────────────────────────────────
+    res_any = nh_scores(cands_any, job.jd, sim, {'SS', 'CS', 'VS', 'LV'}, vs_variant='original')
     any_scores = _vector({i: res_any[i]['final_score'] for i in ids}, ids)
+
+    def _mean(vals):
+        vals = [v for v in vals if v is not None]
+        return float(np.mean(vals)) if vals else None
     evidence = {
-        'first-mention (paper)': {**main[FULL],
-                                  'mean_VS': float(np.mean([pool[i]['skill_validation_score'] or 0 for i in ids]))},
-        'any-mention': {**M.evaluate_scores(any_scores, labels, k=k, seed=seed),
-                        'mean_VS': float(np.mean([pool_any[i]['skill_validation_score'] or 0 for i in ids]))},
+        'JD-conditioned evidence (revised)': {**main[FULL],
+            'mean_VS': _mean([nh_detail[FULL][i]['skill_validation_score'] for i in ids])},
+        'original: all skills, first mention': {**main[FULL_ORIG],
+            'mean_VS': _mean([pool[i]['skill_validation_score_original'] for i in ids])},
+        'original: all skills, any mention': {**M.evaluate_scores(any_scores, labels, k=k, seed=seed),
+            'mean_VS': _mean([pool_any[i]['skill_validation_score_original'] for i in ids])},
     }
-    method_scores_any = {FULL: method_scores[FULL], 'NeuroHire: full, VS any-mention': any_scores}
+    method_scores_any = {FULL: method_scores[FULL], FULL_ORIG: method_scores[FULL_ORIG],
+                         'Original formulation: full, any-mention VS': any_scores}
 
     # ── 4. keyword stuffing ───────────────────────────────────────────────
     progress(f'[{job.id}] keyword-stuffing robustness')
@@ -194,9 +213,10 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
             'FS': r['final_score'], 'SS': r['semantic_score'], 'CS': r['consistency_score'],
             'VS': r['skill_validation_score'], 'LV': r['lv_score'], 'LV_raw': a['lv_raw'],
             'AS': r['analytical_score'], 'fit': r['final_fit'],
-            'VS_JD': nh_detail[FULL_JD][rid]['skill_validation_score'],
-            'FS_E': nh_detail[FULL_JD][rid]['final_score'], 'rank_E': nh_detail[FULL_JD][rid]['rank'],
-            'VS_any': pool_any[rid]['skill_validation_score'],
+            'VS_original': a['skill_validation_score_original'],
+            'FS_original': nh_detail[FULL_ORIG][rid]['final_score'],
+            'rank_original': nh_detail[FULL_ORIG][rid]['rank'],
+            'VS_original_any': pool_any[rid]['skill_validation_score_original'],
             'experience_dated': a['experience_years_dated'], 'experience_claimed': a['experience_years_claimed'],
             'n_skills': len(a['skills']), 'skills': ' '.join(a['skills']),
             'cs_flags': '; '.join(f['rule'] for f in a['consistency_flags']),
@@ -238,14 +258,15 @@ def stuffing_experiment(ids, labels, texts, pool, job, ref, sim, similarity, k, 
     aug_pool = {**pool, **stuffed_pool}
     aug_texts = [aug_pool[i]['resume_text_redacted'] for i in aug_ids]
     cands = to_candidates({i: aug_pool[i] for i in aug_ids})
+    cands_orig = to_candidates({i: aug_pool[i] for i in aug_ids}, original=True)
 
     scores = {name: [float(x) for x in fn(aug_texts, job.jd)]
               for name, fn in baseline_scorers(similarity, sim).items()}
     for name, comps in ABLATIONS:
         res = nh_scores(cands, job.jd, sim, comps)
         scores[name] = [res[i]['final_score'] for i in aug_ids]
-    for name, comps in JD_ABLATIONS:
-        res = nh_scores(cands, job.jd, sim, comps, vs_variant='jd')
+    for name, comps in ORIGINAL_ABLATIONS:
+        res = nh_scores(cands_orig, job.jd, sim, comps, vs_variant='original')
         scores[name] = [res[i]['final_score'] for i in aug_ids]
 
     out = {'stuffed_skills': jd_skills, 'n_stuffed': len(stuffed_texts), 'n_negatives_total':

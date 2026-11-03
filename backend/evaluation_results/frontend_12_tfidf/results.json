@@ -22,8 +22,8 @@
     "seed": 42,
     "stuffing sample (non-relevant r\u00e9sum\u00e9s per job)": "all",
     "fairness sample (r\u00e9sum\u00e9s per job)": "all",
-    "code version": "7a4a68c",
-    "run at": "2026-11-03 14:14 UTC"
+    "code version": "d29a7a7",
+    "run at": "2026-11-03 14:51 UTC"
   },
   "jobs": [
     {
@@ -129,7 +129,7 @@
           "AUC": 0.9714285714285714,
           "ties": 0
         },
-        "NeuroHire-E: SS+VS_JD": {
+        "Original formulation: SS+CS+VS": {
           "P@5": 1.0,
           "R@5": 0.7142857142857143,
           "NDCG@5": 1.0,
@@ -139,7 +139,7 @@
           "AUC": 1.0,
           "ties": 0
         },
-        "NeuroHire-E: full, JD-conditioned evidence": {
+        "Original formulation: full": {
           "P@5": 1.0,
           "R@5": 0.7142857142857143,
           "NDCG@5": 1.0,
@@ -316,7 +316,7 @@
               1.0
             ]
           },
-          "NeuroHire-E: SS+VS_JD": {
+          "Original formulation: SS+CS+VS": {
             "AP": [
               1.0,
               1.0
@@ -334,7 +334,7 @@
               1.0
             ]
           },
-          "NeuroHire-E: full, JD-conditioned evidence": {
+          "Original formulation: full": {
             "AP": [
               0.9095238095238096,
               1.0
@@ -626,7 +626,7 @@
               "p": 1.0
             }
           },
-          "NeuroHire-E: SS+VS_JD": {
+          "Original formulation: SS+CS+VS": {
             "AP": {
               "mean": 0.0,
               "ci": [
@@ -660,7 +660,7 @@
               "p": 1.0
             }
           },
-          "NeuroHire-E: full, JD-conditioned evidence": {
+          "Original formulation: full": {
             "AP": {
               "mean": -0.01703125901875903,
               "ci": [
@@ -700,74 +700,74 @@
         {
           "w_ss": 0.0,
           "w_as": 1.0,
-          "AP": 0.8989047619047696,
-          "NDCG@5": 1.0,
-          "P@5": 1.0,
-          "AUC": 0.7857142857142857,
-          "E_AP": 0.8857142857142858,
-          "E_NDCG@5": 0.8687949224876582,
-          "E_P@5": 0.8,
-          "E_AUC": 0.8
+          "AP": 0.8857142857142858,
+          "NDCG@5": 0.8687949224876582,
+          "P@5": 0.8,
+          "AUC": 0.8,
+          "O_AP": 0.8989047619047696,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.7857142857142857
         },
         {
           "w_ss": 0.1,
           "w_as": 0.9,
-          "AP": 0.9200680272108842,
-          "NDCG@5": 1.0,
-          "P@5": 1.0,
-          "AUC": 0.8285714285714286,
-          "E_AP": 0.8857142857142858,
-          "E_NDCG@5": 0.8687949224876582,
-          "E_P@5": 0.8,
-          "E_AUC": 0.8
+          "AP": 0.8857142857142858,
+          "NDCG@5": 0.8687949224876582,
+          "P@5": 0.8,
+          "AUC": 0.8,
+          "O_AP": 0.9200680272108842,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.8285714285714286
         },
         {
           "w_ss": 0.2,
           "w_as": 0.8,
-          "AP": 0.9276437847866419,
-          "NDCG@5": 1.0,
-          "P@5": 1.0,
-          "AUC": 0.8571428571428571,
-          "E_AP": 0.8976190476190476,
-          "E_NDCG@5": 0.8687949224876582,
-          "E_P@5": 0.8,
-          "E_AUC": 0.8285714285714286
+          "AP": 0.8976190476190476,
+          "NDCG@5": 0.8687949224876582,
+          "P@5": 0.8,
+          "AUC": 0.8285714285714286,
+          "O_AP": 0.9276437847866419,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.8571428571428571
         },
         {
           "w_ss": 0.3,
           "w_as": 0.7,
-          "AP": 0.9276437847866419,
-          "NDCG@5": 1.0,
-          "P@5": 1.0,
-          "AUC": 0.8571428571428571,
-          "E_AP": 0.936734693877551,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 0.8857142857142857
-        },
-        {
-          "w_ss": 0.4,
-          "w_as": 0.6,
           "AP": 0.936734693877551,
           "NDCG@5": 1.0,
           "P@5": 1.0,
           "AUC": 0.8857142857142857,
-          "E_AP": 0.961734693877551,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 0.9428571428571428
+          "O_AP": 0.9276437847866419,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.8571428571428571
+        },
+        {
+          "w_ss": 0.4,
+          "w_as": 0.6,
+          "AP": 0.961734693877551,
+          "NDCG@5": 1.0,
+          "P@5": 1.0,
+          "AUC": 0.9428571428571428,
+          "O_AP": 0.936734693877551,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.8857142857142857
         },
         {
           "w_ss": 0.5,
           "w_as": 0.5,
-          "AP": 0.9682539682539683,
+          "AP": 0.961734693877551,
           "NDCG@5": 1.0,
           "P@5": 1.0,
           "AUC": 0.9428571428571428,
-          "E_AP": 0.961734693877551,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 0.9428571428571428
+          "O_AP": 0.9682539682539683,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.9428571428571428
         },
         {
           "w_ss": 0.6,
@@ -776,10 +776,10 @@
           "NDCG@5": 1.0,
           "P@5": 1.0,
           "AUC": 0.9714285714285714,
-          "E_AP": 0.9821428571428571,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 0.9714285714285714
+          "O_AP": 0.9821428571428571,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.9714285714285714
         },
         {
           "w_ss": 0.7,
@@ -788,10 +788,10 @@
           "NDCG@5": 1.0,
           "P@5": 1.0,
           "AUC": 0.9714285714285714,
-          "E_AP": 0.9821428571428571,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 0.9714285714285714
+          "O_AP": 0.9821428571428571,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 0.9714285714285714
         },
         {
           "w_ss": 0.8,
@@ -800,10 +800,10 @@
           "NDCG@5": 1.0,
           "P@5": 1.0,
           "AUC": 1.0,
-          "E_AP": 1.0,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 1.0
+          "O_AP": 1.0,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 1.0
         },
         {
           "w_ss": 0.9,
@@ -812,10 +812,10 @@
           "NDCG@5": 1.0,
           "P@5": 1.0,
           "AUC": 1.0,
-          "E_AP": 1.0,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 1.0
+          "O_AP": 1.0,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 1.0
         },
         {
           "w_ss": 1.0,
@@ -824,14 +824,25 @@
           "NDCG@5": 1.0,
           "P@5": 1.0,
           "AUC": 1.0,
-          "E_AP": 1.0,
-          "E_NDCG@5": 1.0,
-          "E_P@5": 1.0,
-          "E_AUC": 1.0
+          "O_AP": 1.0,
+          "O_NDCG@5": 1.0,
+          "O_P@5": 1.0,
+          "O_AUC": 1.0
         }
       ],
       "evidence": {
-        "first-mention (paper)": {
+        "JD-conditioned evidence (revised)": {
+          "P@5": 1.0,
+          "R@5": 0.7142857142857143,
+          "NDCG@5": 1.0,
+          "AP": 0.9821428571428571,
+          "R-Prec": 0.8571428571428571,
+          "MRR": 1.0,
+          "AUC": 0.9714285714285714,
+          "ties": 0,
+          "mean_VS": 27.0825
+        },
+        "original: all skills, first mention": {
           "P@5": 1.0,
           "R@5": 0.7142857142857143,
           "NDCG@5": 1.0,
@@ -842,7 +853,7 @@
           "ties": 0,
           "mean_VS": 34.14416666666666
         },
-        "any-mention": {
+        "original: all skills, any mention": {
           "P@5": 1.0,
           "R@5": 0.7142857142857143,
           "NDCG@5": 1.0,
@@ -868,13 +879,27 @@
               1.0
             ],
             "AUC": [
-              0.8285714285714286,
+              0.8857142857142857,
               1.0
             ]
           },
-          "NeuroHire: full, VS any-mention": {
+          "Original formulation: full": {
             "AP": [
-              0.8083333333333333,
+              0.9095238095238096,
+              1.0
+            ],
+            "NDCG@5": [
+              0.8687949224876582,
+              1.0
+            ],
+            "AUC": [
+              0.8857142857142857,
+              1.0
+            ]
+          },
+          "Original formulation: full, any-mention VS": {
+            "AP": [
+              0.8210572562358277,
               1.0
             ],
             "NDCG@5": [
@@ -882,36 +907,62 @@
               1.0
             ],
             "AUC": [
-              0.6571428571428571,
+              0.7142857142857143,
               1.0
             ]
           }
         },
         "diff": {
-          "NeuroHire: full, VS any-mention": {
+          "Original formulation: full": {
             "AP": {
-              "mean": -0.03434185219542363,
+              "mean": 0.0,
               "ci": [
-                -0.12414965986394566,
+                0.0,
                 0.0
               ],
-              "p": 0.594
+              "p": 1.0
             },
             "NDCG@5": {
-              "mean": -0.03119441870767412,
+              "mean": 0.0,
               "ci": [
-                -0.169580102636808,
+                0.0,
                 0.0
               ],
               "p": 1.0
             },
             "AUC": {
-              "mean": -0.0578,
+              "mean": 0.0,
               "ci": [
-                -0.20071428571428573,
+                0.0,
                 0.0
               ],
-              "p": 0.594
+              "p": 1.0
+            }
+          },
+          "Original formulation: full, any-mention VS": {
+            "AP": {
+              "mean": -0.03577597402597403,
+              "ci": [
+                -0.12825706039991777,
+                0.0
+              ],
+              "p": 0.537
+            },
+            "NDCG@5": {
+              "mean": -0.03299809625569391,
+              "ci": [
+                -0.1851819472113565,
+                0.0
+              ],
+              "p": 1.0
+            },
+            "AUC": {
+              "mean": -0.05971428571428571,
+              "ci": [
+                -0.22857142857142854,
+                0.0
+              ],
+              "p": 0.537
             }
           }
         }
@@ -998,6 +1049,24 @@
             "mean_score_gain_pct": 4.597711408959324
           },
           "NeuroHire: SS+CS+VS": {
+            "AP": 0.9821428571428571,
+            "NDCG@5": 1.0,
+            "P@5": 1.0,
+            "AUC": 0.9857142857142858,
+            "stuffed_in_top5": 0,
+            "mean_rank_gain": 3.6,
+            "mean_score_gain_pct": 14.863364060913828
+          },
+          "NeuroHire: full (SS+CS+VS+LV)": {
+            "AP": 0.9478458049886621,
+            "NDCG@5": 1.0,
+            "P@5": 1.0,
+            "AUC": 0.9571428571428572,
+            "stuffed_in_top5": 0,
+            "mean_rank_gain": 2.8,
+            "mean_score_gain_pct": 18.64102181828244
+          },
+          "Original formulation: SS+CS+VS": {
             "AP": 1.0,
             "NDCG@5": 1.0,
             "P@5": 1.0,
@@ -1006,7 +1075,7 @@
             "mean_rank_gain": 3.4,
             "mean_score_gain_pct": 11.133824598375693
           },
-          "NeuroHire: full (SS+CS+VS+LV)": {
+          "Original formulation: full": {
             "AP": 0.936734693877551,
             "NDCG@5": 1.0,
             "P@5": 1.0,
@@ -1014,24 +1083,6 @@
             "stuffed_in_top5": 0,
             "mean_rank_gain": 2.6,
             "mean_score_gain_pct": 15.164563036672552
-          },
-          "NeuroHire-E: SS+VS_JD": {
-            "AP": 1.0,
-            "NDCG@5": 1.0,
-            "P@5": 1.0,
-            "AUC": 1.0,
-            "stuffed_in_top5": 0,
-            "mean_rank_gain": 3.8,
-            "mean_score_gain_pct": 71.27378026769365
-          },
-          "NeuroHire-E: full, JD-conditioned evidence": {
-            "AP": 0.9478458049886621,
-            "NDCG@5": 1.0,
-            "P@5": 1.0,
-            "AUC": 0.9571428571428572,
-            "stuffed_in_top5": 0,
-            "mean_rank_gain": 2.8,
-            "mean_score_gain_pct": 18.64102181828244
           }
         },
         "bootstrap_vs_ss_only": {
@@ -1138,47 +1189,19 @@
             },
             "NeuroHire: SS+CS+VS": {
               "AP": [
-                1.0,
+                0.9093537414965985,
                 1.0
               ],
               "NDCG@5": [
-                1.0,
+                0.8687949224876582,
                 1.0
               ],
               "AUC": [
-                1.0,
+                0.9142857142857143,
                 1.0
               ]
             },
             "NeuroHire: full (SS+CS+VS+LV)": {
-              "AP": [
-                0.7947278911564626,
-                1.0
-              ],
-              "NDCG@5": [
-                0.7227265726449519,
-                1.0
-              ],
-              "AUC": [
-                0.8,
-                1.0
-              ]
-            },
-            "NeuroHire-E: SS+VS_JD": {
-              "AP": [
-                1.0,
-                1.0
-              ],
-              "NDCG@5": [
-                1.0,
-                1.0
-              ],
-              "AUC": [
-                1.0,
-                1.0
-              ]
-            },
-            "NeuroHire-E: full, JD-conditioned evidence": {
               "AP": [
                 0.8210884353741497,
                 1.0
@@ -1189,6 +1212,34 @@
               ],
               "AUC": [
                 0.8425,
+                1.0
+              ]
+            },
+            "Original formulation: SS+CS+VS": {
+              "AP": [
+                1.0,
+                1.0
+              ],
+              "NDCG@5": [
+                1.0,
+                1.0
+              ],
+              "AUC": [
+                1.0,
+                1.0
+              ]
+            },
+            "Original formulation: full": {
+              "AP": [
+                0.7947278911564626,
+                1.0
+              ],
+              "NDCG@5": [
+                0.7227265726449519,
+                1.0
+              ],
+              "AUC": [
+                0.8,
                 1.0
               ]
             }
@@ -1352,83 +1403,31 @@
             },
             "NeuroHire: SS+CS+VS": {
               "AP": {
-                "mean": 0.049601062826062844,
+                "mean": 0.032350957177742896,
                 "ci": [
                   0.0,
-                  0.17265306122448956
+                  0.12414965986394566
                 ],
-                "p": 0.512
+                "p": 0.645
               },
               "NDCG@5": {
-                "mean": 0.03561771639583027,
+                "mean": 0.02991394594244909,
                 "ci": [
                   0.0,
-                  0.2772734273550481
+                  0.169580102636808
                 ],
                 "p": 1.0
               },
               "AUC": {
-                "mean": 0.04214999999999999,
+                "mean": 0.02765714285714286,
                 "ci": [
                   0.0,
-                  0.15714285714285714
+                  0.11428571428571421
                 ],
-                "p": 0.512
+                "p": 0.645
               }
             },
             "NeuroHire: full (SS+CS+VS+LV)": {
-              "AP": {
-                "mean": -0.013226308810237373,
-                "ci": [
-                  -0.13526077097505673,
-                  0.10909090909090913
-                ],
-                "p": 0.928
-              },
-              "NDCG@5": {
-                "mean": -0.002626364070842918,
-                "ci": [
-                  -0.14606834984270634,
-                  0.14606834984270634
-                ],
-                "p": 1.0
-              },
-              "AUC": {
-                "mean": -0.015278571428571428,
-                "ci": [
-                  -0.12857142857142856,
-                  0.08571428571428574
-                ],
-                "p": 0.925
-              }
-            },
-            "NeuroHire-E: SS+VS_JD": {
-              "AP": {
-                "mean": 0.049601062826062844,
-                "ci": [
-                  0.0,
-                  0.17265306122448956
-                ],
-                "p": 0.512
-              },
-              "NDCG@5": {
-                "mean": 0.03561771639583027,
-                "ci": [
-                  0.0,
-                  0.2772734273550481
-                ],
-                "p": 1.0
-              },
-              "AUC": {
-                "mean": 0.04214999999999999,
-                "ci": [
-                  0.0,
-                  0.15714285714285714
-                ],
-                "p": 0.512
-              }
-            },
-            "NeuroHire-E: full, JD-conditioned evidence": {
               "AP": {
                 "mean": -0.0017999318142175277,
                 "ci": [
@@ -1453,22 +1452,74 @@
                 ],
                 "p": 1.0
               }
+            },
+            "Original formulation: SS+CS+VS": {
+              "AP": {
+                "mean": 0.049601062826062844,
+                "ci": [
+                  0.0,
+                  0.17265306122448956
+                ],
+                "p": 0.512
+              },
+              "NDCG@5": {
+                "mean": 0.03561771639583027,
+                "ci": [
+                  0.0,
+                  0.2772734273550481
+                ],
+                "p": 1.0
+              },
+              "AUC": {
+                "mean": 0.04214999999999999,
+                "ci": [
+                  0.0,
+                  0.15714285714285714
+                ],
+                "p": 0.512
+              }
+            },
+            "Original formulation: full": {
+              "AP": {
+                "mean": -0.013226308810237373,
+                "ci": [
+                  -0.13526077097505673,
+                  0.10909090909090913
+                ],
+                "p": 0.928
+              },
+              "NDCG@5": {
+                "mean": -0.002626364070842918,
+                "ci": [
+                  -0.14606834984270634,
+                  0.14606834984270634
+                ],
+                "p": 1.0
+              },
+              "AUC": {
+                "mean": -0.015278571428571428,
+                "ci": [
+                  -0.12857142857142856,
+                  0.08571428571428574
+                ],
+                "p": 0.925
+              }
             }
           }
         },
         "stuffed_VS": {
-          "Candidate_02_Priya_Venkataraman__stuffed": 4.35,
-          "Candidate_05_Karthik_Reddy__stuffed": 5.0,
-          "Candidate_07_Arun_Balasubramanian__stuffed": 0.0,
-          "Candidate_09_Suresh_Babu__stuffed": 0.0,
-          "Candidate_11_Manoj_Kumar__stuffed": 0.0
+          "Candidate_02_Priya_Venkataraman__stuffed": 8.33,
+          "Candidate_05_Karthik_Reddy__stuffed": 8.33,
+          "Candidate_07_Arun_Balasubramanian__stuffed": 16.67,
+          "Candidate_09_Suresh_Babu__stuffed": 8.33,
+          "Candidate_11_Manoj_Kumar__stuffed": 8.33
         },
         "original_VS": {
           "Candidate_02_Priya_Venkataraman": 8.33,
-          "Candidate_05_Karthik_Reddy": 11.11,
-          "Candidate_07_Arun_Balasubramanian": 0.0,
-          "Candidate_09_Suresh_Babu": 16.67,
-          "Candidate_11_Manoj_Kumar": 0.0
+          "Candidate_05_Karthik_Reddy": 8.33,
+          "Candidate_07_Arun_Balasubramanian": 16.67,
+          "Candidate_09_Suresh_Babu": 8.33,
+          "Candidate_11_Manoj_Kumar": 8.33
         }
       },
       "fairness": {
@@ -1481,14 +1532,14 @@
           "share_rank_changed": 0.0,
           "gender_gap_mean_FS": 0.0,
           "group_mean_FS": {
-            "male / north": 36.04833333333334,
-            "female / north": 36.04833333333334,
-            "male / south": 36.04833333333334,
-            "female / south": 36.04833333333334,
-            "male / muslim": 36.04833333333334,
-            "female / muslim": 36.04833333333334,
-            "male / christian": 36.04833333333334,
-            "female / christian": 36.04833333333334
+            "male / north": 35.1525,
+            "female / north": 35.1525,
+            "male / south": 35.1525,
+            "female / south": 35.1525,
+            "male / muslim": 35.1525,
+            "female / muslim": 35.1525,
+            "male / christian": 35.1525,
+            "female / christian": 35.1525
           },
           "per_candidate": {
             "Candidate_01_Arjun_Sharma": {
@@ -1532,20 +1583,20 @@
         "redaction off": {
           "variants_per_candidate": 8,
           "candidates_tested": 12,
-          "mean_abs_dFS": 0.006666666666666525,
-          "max_abs_dFS": 0.03999999999999915,
+          "mean_abs_dFS": 0.006666666666667116,
+          "max_abs_dFS": 0.04000000000000625,
           "max_abs_rank_change": 0,
           "share_rank_changed": 0.0,
           "gender_gap_mean_FS": 0.0,
           "group_mean_FS": {
-            "male / north": 35.65916666666667,
-            "female / north": 35.65916666666667,
-            "male / south": 35.65916666666667,
-            "female / south": 35.65916666666667,
-            "male / muslim": 35.65916666666667,
-            "female / muslim": 35.65916666666667,
-            "male / christian": 35.65916666666667,
-            "female / christian": 35.65916666666667
+            "male / north": 34.76166666666666,
+            "female / north": 34.76166666666666,
+            "male / south": 34.76166666666666,
+            "female / south": 34.76166666666666,
+            "male / muslim": 34.76166666666666,
+            "female / muslim": 34.76166666666666,
+            "male / christian": 34.76166666666666,
+            "female / christian": 34.76166666666666
           },
           "per_candidate": {
             "Candidate_01_Arjun_Sharma": {
@@ -1567,7 +1618,7 @@
               "max_abs_dFS": 0.0
             },
             "Candidate_07_Arun_Balasubramanian": {
-              "max_abs_dFS": 0.03999999999999915
+              "max_abs_dFS": 0.04000000000000625
             },
             "Candidate_08_Pooja_Nair": {
               "max_abs_dFS": 0.0
@@ -1597,18 +1648,18 @@
           "id": "Candidate_01_Arjun_Sharma",
           "label": 1,
           "rank_full": 6,
-          "FS": 36.22,
+          "FS": 35.11,
           "SS": 27.04,
           "CS": 100.0,
-          "VS": 50.0,
+          "VS": 41.67,
           "LV": 0.0,
           "LV_raw": 0.2553,
-          "AS": 50.0,
+          "AS": 47.22,
           "fit": "Low",
-          "VS_JD": 41.67,
-          "FS_E": 35.11,
-          "rank_E": 6,
-          "VS_any": 58.33,
+          "VS_original": 50.0,
+          "FS_original": 36.22,
+          "rank_original": 6,
+          "VS_original_any": 58.33,
           "experience_dated": 3.9,
           "experience_claimed": 4.0,
           "n_skills": 12,
@@ -1621,10 +1672,10 @@
           "score[TF-IDF (pairwise) only]": 27.04,
           "score[NeuroHire: SS only]": 27.04,
           "score[NeuroHire: SS+CS]": 56.22,
-          "score[NeuroHire: SS+CS+VS]": 46.22,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 36.22,
-          "score[NeuroHire-E: SS+VS_JD]": 32.89,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 35.11
+          "score[NeuroHire: SS+CS+VS]": 44.56,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 35.11,
+          "score[Original formulation: SS+CS+VS]": 46.22,
+          "score[Original formulation: full]": 36.22
         },
         {
           "id": "Candidate_02_Priya_Venkataraman",
@@ -1638,10 +1689,10 @@
           "LV_raw": 0.8136,
           "AS": 50.32,
           "fit": "Low",
-          "VS_JD": 8.33,
-          "FS_E": 25.41,
-          "rank_E": 9,
-          "VS_any": 66.67,
+          "VS_original": 8.33,
+          "FS_original": 25.41,
+          "rank_original": 9,
+          "VS_original_any": 66.67,
           "experience_dated": 4.9,
           "experience_claimed": 5.0,
           "n_skills": 12,
@@ -1656,25 +1707,25 @@
           "score[NeuroHire: SS+CS]": 45.28,
           "score[NeuroHire: SS+CS+VS]": 26.94,
           "score[NeuroHire: full (SS+CS+VS+LV)]": 25.41,
-          "score[NeuroHire-E: SS+VS_JD]": 8.61,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 25.41
+          "score[Original formulation: SS+CS+VS]": 26.94,
+          "score[Original formulation: full]": 25.41
         },
         {
           "id": "Candidate_03_Rahul_Mehta",
           "label": 1,
           "rank_full": 8,
-          "FS": 27.89,
+          "FS": 31.22,
           "SS": 22.77,
           "CS": 100.0,
-          "VS": 0.0,
+          "VS": 25.0,
           "LV": 6.69,
           "LV_raw": 0.3429,
-          "AS": 35.56,
+          "AS": 43.9,
           "fit": "Low",
-          "VS_JD": 25.0,
-          "FS_E": 31.22,
-          "rank_E": 8,
-          "VS_any": 44.44,
+          "VS_original": 0.0,
+          "FS_original": 27.89,
+          "rank_original": 8,
+          "VS_original_any": 44.44,
           "experience_dated": 2.9,
           "experience_claimed": 3.0,
           "n_skills": 9,
@@ -1687,27 +1738,27 @@
           "score[TF-IDF (pairwise) only]": 22.77,
           "score[NeuroHire: SS only]": 22.77,
           "score[NeuroHire: SS+CS]": 53.66,
-          "score[NeuroHire: SS+CS+VS]": 33.66,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 27.89,
-          "score[NeuroHire-E: SS+VS_JD]": 23.66,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 31.22
+          "score[NeuroHire: SS+CS+VS]": 38.66,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 31.22,
+          "score[Original formulation: SS+CS+VS]": 33.66,
+          "score[Original formulation: full]": 27.89
         },
         {
           "id": "Candidate_04_Sneha_Pillai",
           "label": 1,
-          "rank_full": 3,
-          "FS": 48.81,
+          "rank_full": 4,
+          "FS": 43.92,
           "SS": 26.24,
           "CS": 100.0,
-          "VS": 70.0,
+          "VS": 33.33,
           "LV": 77.97,
           "LV_raw": 1.2766,
-          "AS": 82.66,
+          "AS": 70.43,
           "fit": "Medium",
-          "VS_JD": 33.33,
-          "FS_E": 43.92,
-          "rank_E": 4,
-          "VS_any": 80.0,
+          "VS_original": 70.0,
+          "FS_original": 48.81,
+          "rank_original": 3,
+          "VS_original_any": 80.0,
           "experience_dated": 3.9,
           "experience_claimed": 4.0,
           "n_skills": 10,
@@ -1720,27 +1771,27 @@
           "score[TF-IDF (pairwise) only]": 26.24,
           "score[NeuroHire: SS only]": 26.24,
           "score[NeuroHire: SS+CS]": 55.74,
-          "score[NeuroHire: SS+CS+VS]": 49.74,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 48.81,
-          "score[NeuroHire-E: SS+VS_JD]": 29.08,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 43.92
+          "score[NeuroHire: SS+CS+VS]": 42.41,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 43.92,
+          "score[Original formulation: SS+CS+VS]": 49.74,
+          "score[Original formulation: full]": 48.81
         },
         {
           "id": "Candidate_05_Karthik_Reddy",
           "label": 0,
           "rank_full": 11,
-          "FS": 21.27,
+          "FS": 20.9,
           "SS": 6.49,
           "CS": 100.0,
-          "VS": 11.11,
+          "VS": 8.33,
           "LV": 19.22,
           "LV_raw": 0.507,
-          "AS": 43.44,
+          "AS": 42.52,
           "fit": "Low",
-          "VS_JD": 8.33,
-          "FS_E": 20.9,
-          "rank_E": 11,
-          "VS_any": 77.78,
+          "VS_original": 11.11,
+          "FS_original": 21.27,
+          "rank_original": 11,
+          "VS_original_any": 77.78,
           "experience_dated": 5.9,
           "experience_claimed": 6.0,
           "n_skills": 9,
@@ -1753,27 +1804,27 @@
           "score[TF-IDF (pairwise) only]": 6.49,
           "score[NeuroHire: SS only]": 6.49,
           "score[NeuroHire: SS+CS]": 43.89,
-          "score[NeuroHire: SS+CS+VS]": 26.11,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 21.27,
-          "score[NeuroHire-E: SS+VS_JD]": 7.23,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 20.9
+          "score[NeuroHire: SS+CS+VS]": 25.56,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 20.9,
+          "score[Original formulation: SS+CS+VS]": 26.11,
+          "score[Original formulation: full]": 21.27
         },
         {
           "id": "Candidate_06_Divya_Krishnan",
           "label": 1,
-          "rank_full": 2,
-          "FS": 53.29,
+          "rank_full": 1,
+          "FS": 51.06,
           "SS": 31.95,
           "CS": 100.0,
-          "VS": 66.67,
+          "VS": 50.0,
           "LV": 89.2,
           "LV_raw": 1.4237,
-          "AS": 85.29,
+          "AS": 79.73,
           "fit": "Medium",
-          "VS_JD": 50.0,
-          "FS_E": 51.06,
-          "rank_E": 1,
-          "VS_any": 100.0,
+          "VS_original": 66.67,
+          "FS_original": 53.29,
+          "rank_original": 2,
+          "VS_original_any": 100.0,
           "experience_dated": 4.9,
           "experience_claimed": 5.0,
           "n_skills": 12,
@@ -1786,27 +1837,27 @@
           "score[TF-IDF (pairwise) only]": 31.95,
           "score[NeuroHire: SS only]": 31.95,
           "score[NeuroHire: SS+CS]": 59.17,
-          "score[NeuroHire: SS+CS+VS]": 52.51,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 53.29,
-          "score[NeuroHire-E: SS+VS_JD]": 39.17,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 51.06
+          "score[NeuroHire: SS+CS+VS]": 49.17,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 51.06,
+          "score[Original formulation: SS+CS+VS]": 52.51,
+          "score[Original formulation: full]": 53.29
         },
         {
           "id": "Candidate_07_Arun_Balasubramanian",
           "label": 0,
           "rank_full": 7,
-          "FS": 32.52,
+          "FS": 34.75,
           "SS": 13.05,
           "CS": 100.0,
-          "VS": 0.0,
+          "VS": 16.67,
           "LV": 85.2,
           "LV_raw": 1.3714,
-          "AS": 61.73,
+          "AS": 67.29,
           "fit": "Low",
-          "VS_JD": 16.67,
-          "FS_E": 34.75,
-          "rank_E": 7,
-          "VS_any": 100.0,
+          "VS_original": 0.0,
+          "FS_original": 32.52,
+          "rank_original": 7,
+          "VS_original_any": 100.0,
           "experience_dated": 2.9,
           "experience_claimed": 3.0,
           "n_skills": 8,
@@ -1819,27 +1870,27 @@
           "score[TF-IDF (pairwise) only]": 13.05,
           "score[NeuroHire: SS only]": 13.05,
           "score[NeuroHire: SS+CS]": 47.83,
-          "score[NeuroHire: SS+CS+VS]": 27.83,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 32.52,
-          "score[NeuroHire-E: SS+VS_JD]": 14.5,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 34.75
+          "score[NeuroHire: SS+CS+VS]": 31.17,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 34.75,
+          "score[Original formulation: SS+CS+VS]": 27.83,
+          "score[Original formulation: full]": 32.52
         },
         {
           "id": "Candidate_08_Pooja_Nair",
           "label": 1,
           "rank_full": 5,
-          "FS": 41.24,
+          "FS": 40.68,
           "SS": 18.62,
           "CS": 88.0,
-          "VS": 37.5,
+          "VS": 33.33,
           "LV": 100.0,
           "LV_raw": 1.5652,
-          "AS": 75.17,
+          "AS": 73.78,
           "fit": "Medium",
-          "VS_JD": 33.33,
-          "FS_E": 40.68,
-          "rank_E": 5,
-          "VS_any": 87.5,
+          "VS_original": 37.5,
+          "FS_original": 41.24,
+          "rank_original": 5,
+          "VS_original_any": 87.5,
           "experience_dated": 1.9,
           "experience_claimed": 2.0,
           "n_skills": 8,
@@ -1852,27 +1903,27 @@
           "score[TF-IDF (pairwise) only]": 18.62,
           "score[NeuroHire: SS only]": 18.62,
           "score[NeuroHire: SS+CS]": 46.37,
-          "score[NeuroHire: SS+CS+VS]": 36.27,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 41.24,
-          "score[NeuroHire-E: SS+VS_JD]": 24.5,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 40.68
+          "score[NeuroHire: SS+CS+VS]": 35.44,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 40.68,
+          "score[Original formulation: SS+CS+VS]": 36.27,
+          "score[Original formulation: full]": 41.24
         },
         {
           "id": "Candidate_09_Suresh_Babu",
           "label": 0,
           "rank_full": 12,
-          "FS": 18.87,
+          "FS": 17.76,
           "SS": 5.53,
           "CS": 100.0,
-          "VS": 16.67,
+          "VS": 8.33,
           "LV": 0.0,
           "LV_raw": 0.2553,
-          "AS": 38.89,
+          "AS": 36.11,
           "fit": "Low",
-          "VS_JD": 8.33,
-          "FS_E": 17.76,
-          "rank_E": 12,
-          "VS_any": 66.67,
+          "VS_original": 16.67,
+          "FS_original": 18.87,
+          "rank_original": 12,
+          "VS_original_any": 66.67,
           "experience_dated": 3.9,
           "experience_claimed": 4.0,
           "n_skills": 6,
@@ -1885,27 +1936,27 @@
           "score[TF-IDF (pairwise) only]": 5.53,
           "score[NeuroHire: SS only]": 5.53,
           "score[NeuroHire: SS+CS]": 43.32,
-          "score[NeuroHire: SS+CS+VS]": 26.65,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 18.87,
-          "score[NeuroHire-E: SS+VS_JD]": 6.65,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 17.76
+          "score[NeuroHire: SS+CS+VS]": 24.98,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 17.76,
+          "score[Original formulation: SS+CS+VS]": 26.65,
+          "score[Original formulation: full]": 18.87
         },
         {
           "id": "Candidate_10_Ananya_Gupta",
           "label": 1,
-          "rank_full": 1,
-          "FS": 55.42,
+          "rank_full": 2,
+          "FS": 49.78,
           "SS": 33.89,
           "CS": 100.0,
-          "VS": 92.31,
+          "VS": 50.0,
           "LV": 70.83,
           "LV_raw": 1.1831,
-          "AS": 87.71,
+          "AS": 73.61,
           "fit": "Medium",
-          "VS_JD": 50.0,
-          "FS_E": 49.78,
-          "rank_E": 2,
-          "VS_any": 92.31,
+          "VS_original": 92.31,
+          "FS_original": 55.42,
+          "rank_original": 1,
+          "VS_original_any": 92.31,
           "experience_dated": 5.9,
           "experience_claimed": 6.0,
           "n_skills": 13,
@@ -1918,27 +1969,27 @@
           "score[TF-IDF (pairwise) only]": 33.89,
           "score[NeuroHire: SS only]": 33.89,
           "score[NeuroHire: SS+CS]": 60.33,
-          "score[NeuroHire: SS+CS+VS]": 58.8,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 55.42,
-          "score[NeuroHire-E: SS+VS_JD]": 40.33,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 49.78
+          "score[NeuroHire: SS+CS+VS]": 50.33,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 49.78,
+          "score[Original formulation: SS+CS+VS]": 58.8,
+          "score[Original formulation: full]": 55.42
         },
         {
           "id": "Candidate_11_Manoj_Kumar",
           "label": 0,
           "rank_full": 10,
-          "FS": 23.66,
+          "FS": 25.32,
           "SS": 6.1,
           "CS": 100.0,
-          "VS": 0.0,
+          "VS": 8.33,
           "LV": null,
           "LV_raw": null,
-          "AS": 50.0,
+          "AS": 54.16,
           "fit": "Low",
-          "VS_JD": 8.33,
-          "FS_E": 25.32,
-          "rank_E": 10,
-          "VS_any": 66.67,
+          "VS_original": 0.0,
+          "FS_original": 23.66,
+          "rank_original": 10,
+          "VS_original_any": 66.67,
           "experience_dated": null,
           "experience_claimed": 1.0,
           "n_skills": 6,
@@ -1951,27 +2002,27 @@
           "score[TF-IDF (pairwise) only]": 6.1,
           "score[NeuroHire: SS only]": 6.1,
           "score[NeuroHire: SS+CS]": 43.66,
-          "score[NeuroHire: SS+CS+VS]": 23.66,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 23.66,
-          "score[NeuroHire-E: SS+VS_JD]": 6.99,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 25.32
+          "score[NeuroHire: SS+CS+VS]": 25.32,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 25.32,
+          "score[Original formulation: SS+CS+VS]": 23.66,
+          "score[Original formulation: full]": 23.66
         },
         {
           "id": "Candidate_12_Kavya_Reddy",
           "label": 1,
-          "rank_full": 4,
-          "FS": 47.98,
+          "rank_full": 3,
+          "FS": 45.92,
           "SS": 37.74,
           "CS": 100.0,
-          "VS": 57.14,
+          "VS": 41.67,
           "LV": 32.86,
           "LV_raw": 0.6857,
-          "AS": 63.33,
+          "AS": 58.18,
           "fit": "Medium",
-          "VS_JD": 41.67,
-          "FS_E": 45.92,
-          "rank_E": 3,
-          "VS_any": 85.71,
+          "VS_original": 57.14,
+          "FS_original": 47.98,
+          "rank_original": 4,
+          "VS_original_any": 85.71,
           "experience_dated": 2.9,
           "experience_claimed": 3.0,
           "n_skills": 7,
@@ -1984,10 +2035,10 @@
           "score[TF-IDF (pairwise) only]": 37.74,
           "score[NeuroHire: SS only]": 37.74,
           "score[NeuroHire: SS+CS]": 62.64,
-          "score[NeuroHire: SS+CS+VS]": 54.07,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 47.98,
-          "score[NeuroHire-E: SS+VS_JD]": 39.31,
-          "score[NeuroHire-E: full, JD-conditioned evidence]": 45.92
+          "score[NeuroHire: SS+CS+VS]": 50.98,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 45.92,
+          "score[Original formulation: SS+CS+VS]": 54.07,
+          "score[Original formulation: full]": 47.98
         }
       ],
       "similarity_backend_calls": 5,
@@ -2049,13 +2100,13 @@
       "P@5": 1.0,
       "AUC": 0.9714285714285714
     },
-    "NeuroHire-E: SS+VS_JD": {
+    "Original formulation: SS+CS+VS": {
       "AP": 1.0,
       "NDCG@5": 1.0,
       "P@5": 1.0,
       "AUC": 1.0
     },
-    "NeuroHire-E: full, JD-conditioned evidence": {
+    "Original formulation: full": {
       "AP": 0.9821428571428571,
       "NDCG@5": 1.0,
       "P@5": 1.0,
@@ -2099,24 +2150,24 @@
       "AUC": 0.9428571428571428
     },
     "NeuroHire: SS+CS+VS": {
-      "AP": 1.0,
+      "AP": 0.9821428571428571,
       "NDCG@5": 1.0,
-      "AUC": 1.0
+      "AUC": 0.9857142857142858
     },
     "NeuroHire: full (SS+CS+VS+LV)": {
-      "AP": 0.936734693877551,
-      "NDCG@5": 1.0,
-      "AUC": 0.9428571428571428
-    },
-    "NeuroHire-E: SS+VS_JD": {
-      "AP": 1.0,
-      "NDCG@5": 1.0,
-      "AUC": 1.0
-    },
-    "NeuroHire-E: full, JD-conditioned evidence": {
       "AP": 0.9478458049886621,
       "NDCG@5": 1.0,
       "AUC": 0.9571428571428572
+    },
+    "Original formulation: SS+CS+VS": {
+      "AP": 1.0,
+      "NDCG@5": 1.0,
+      "AUC": 1.0
+    },
+    "Original formulation: full": {
+      "AP": 0.936734693877551,
+      "NDCG@5": 1.0,
+      "AUC": 0.9428571428571428
     }
   }
 }

@@ -129,7 +129,8 @@ export default function AIAnalytics() {
 
   const logs = Array.isArray(rawLogs) ? rawLogs : (rawLogs?.results || []);
   const allCandidates = Array.isArray(rawCandidates) ? rawCandidates : (rawCandidates?.results || []);
-  const scored = allCandidates.filter(c => c.source === 'resume_upload' && c.consistency_score != null);
+  // Analysed résumés (CS can legitimately be N/A when no skills were recognised)
+  const scored = allCandidates.filter(c => c.source === 'resume_upload' && c.final_score != null);
 
   if (isLoading) return <LoadingSkeleton rows={3} />;
   if (!logs.length && !scored.length) return (
@@ -149,10 +150,10 @@ export default function AIAnalytics() {
   // HAAR — share of decisions where the recruiter matched the AI's fit band
   const HAAR = total ? `${agreementRate}%` : '—';
   // CDR — share of scored candidates with at least one consistency rule triggered
-  const flagged = scored.filter(c => (c.consistency_flags?.length || 0) > 0 || c.consistency_score < 100).length;
+  const flagged = scored.filter(c => (c.consistency_flags?.length || 0) > 0 || (c.consistency_score != null && c.consistency_score < 100)).length;
   const CDR = pctOf(flagged, scored.length);
-  // SVC — share of all detected skills that have action-verb evidence (Valid)
-  const allSkills = scored.flatMap(c => c.validated_skills || []);
+  // SVC — share of all detected skills backed by an action verb in the same sentence
+  const allSkills = scored.flatMap(c => c.validated_skills_evidence || c.validated_skills || []);
   const SVC = pctOf(allSkills.filter(v => v.status === 'Valid').length, allSkills.length);
   // LVC — share of scored candidates whose learning velocity could be computed
   const LVC = pctOf(scored.filter(c => c.lv_score != null).length, scored.length);
@@ -247,7 +248,7 @@ export default function AIAnalytics() {
           />
           <MetricCard
             icon={Brain} label="SVC" value={SVC}
-            subtitle={`Skill validation coverage: detected skills with action-verb evidence (${allSkills.length} skills)`}
+            subtitle={`Skill evidence coverage: detected skills backed by an action verb in the same sentence (${allSkills.length} skills)`}
             color="#c4894a" delay={0.1}
           />
           <MetricCard

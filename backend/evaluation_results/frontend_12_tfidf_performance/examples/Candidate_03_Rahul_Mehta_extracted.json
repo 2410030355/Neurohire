@@ -1,0 +1,138 @@
+{
+  "name": "Rahul Mehta",
+  "email": "rahul.mehta@gmail.com",
+  "phone": "+91 76543 21098",
+  "skills": [
+    "bootstrap",
+    "css",
+    "git",
+    "html",
+    "javascript",
+    "react",
+    "responsive design",
+    "rest api",
+    "webpack"
+  ],
+  "other_skills": [],
+  "jd_skills": [
+    "ci/cd",
+    "css",
+    "cypress",
+    "graphql",
+    "javascript",
+    "jest",
+    "react",
+    "redux",
+    "responsive design",
+    "rest api",
+    "typescript",
+    "vue"
+  ],
+  "missing_skills": [
+    "ci/cd",
+    "cypress",
+    "graphql",
+    "jest",
+    "redux",
+    "typescript",
+    "vue"
+  ],
+  "experience_years": 2.9,
+  "experience_years_dated": 2.9,
+  "experience_years_claimed": 3.0,
+  "experience_source": "dated",
+  "employment_history": [
+    {
+      "title": "UI Developer Persistent Systems",
+      "start": "2021-07",
+      "end": "2023-05",
+      "months": 23,
+      "section": "work",
+      "line": 7
+    },
+    {
+      "title": "Frontend Developer Freelance",
+      "start": "2020-07",
+      "end": "2021-06",
+      "months": 12,
+      "section": "work",
+      "line": 11
+    }
+  ],
+  "projects": [],
+  "education": "Bachelor's Degree",
+  "consistency_score": 100.0,
+  "consistency_flags": [],
+  "consistency_rules_skipped": [],
+  "skill_validation_score": 25.0,
+  "skill_validation_score_jd": 25.0,
+  "skill_validation_score_original": 0.0,
+  "jd_skills_evidenced": [
+    "css",
+    "javascript",
+    "react"
+  ],
+  "validated_skills": [
+    {
+      "skill": "bootstrap",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "css",
+      "status": "Partial",
+      "mentions": 4,
+      "evidence": null
+    },
+    {
+      "skill": "git",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "html",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "javascript",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    },
+    {
+      "skill": "react",
+      "status": "Partial",
+      "mentions": 7,
+      "evidence": null
+    },
+    {
+      "skill": "responsive design",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "rest api",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "webpack",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    }
+  ],
+  "lv_raw": 0.3429,
+  "lv_new_skills": [
+    "css"
+  ],
+  "lv_span_years": 2.92,
+  "lv_basis": "2 dated positions",
+  "extraction_method": "regex"
+}

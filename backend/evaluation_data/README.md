@@ -65,17 +65,44 @@ Two label schemes are evaluated separately:
 | DevOps Engineer | DevOps Engineer | DevOps Engineer |
 | Software Tester | Testing | Testing + Automation Testing |
 
-The résumé texts are not in this repository (third-party data). Rebuild them once:
+#### Restoring the 166 résumé texts
 
-```bash
-cd backend
-python manage.py import_resume_csv --csv path/to/UpdatedResumeDataSet.csv --out evaluation_data/kaggle_tech
-```
+The résumé texts are **not committed** (`resumes/` is git-ignored), for two reasons:
 
-This writes `resumes/R0001.txt …` and is deterministic: the same CSV always gives
-the same ids as the committed `categories.csv` and `import_report.json`.
-Paste each job posting's text into `kaggle_tech/jd/<job>.txt` and fill the
-`accessed` dates in `dataset.json`; `evaluate` refuses to run without them.
+* **Licence:** the original Kaggle upload's licence could not be confirmed (copies on
+  other sites carry different licences added by re-uploaders).
+* **Privacy:** these are real people's résumés, and some contain contact details
+  (e.g. an e-mail address, phone number and LinkedIn URL). This repository is public.
+
+What *is* committed pins the exact benchmark: `categories.csv` (ids and labels),
+`import_report.json` (dedup counts) and `resumes_manifest.json` (SHA-256 of the
+source CSV and of every one of the 166 résumé files).
+
+1. Download `UpdatedResumeDataSet.csv` (962 rows, columns `Category`, `Resume`) from Kaggle.
+   SHA-256 of the file used: `c076ae68623eab41403dd6a863aef089b38e4c7e1294d17f9593b67ad2f181fa`.
+2. Run the importer (same deduplication and encoding repair as the original import):
+
+   ```bash
+   cd backend
+   python manage.py import_resume_csv --csv path/to/UpdatedResumeDataSet.csv --out evaluation_data/kaggle_tech
+   ```
+
+3. Expected output:
+
+   ```
+   Verified against resumes_manifest.json: source CSV and all 166 résumés, categories.csv and import_report.json are identical.
+   962 rows → 166 unique résumés (796 duplicates removed) in evaluation_data/kaggle_tech
+   ```
+
+   If the CSV differs in any way (another version, edited rows), the command lists
+   what differs and **writes nothing**, so the committed ids and labels can't be
+   overwritten. A file renamed by the browser (e.g. `UpdatedResumeDataSet (1).csv`)
+   is fine: the check uses the content, not the name.
+4. Optional check: `python manage.py test neurohire.tests.test_evaluation.KaggleTechManifestTests`
+   compares every restored file with the manifest and loads all 166 profiles.
+
+The job descriptions (`jd/*.txt`) are committed. The `accessed` dates in `dataset.json` are
+optional; when filled in, they are printed in the report.
 
 ```bash
 python manage.py evaluate --dataset evaluation_data/kaggle_tech --similarity tfidf    # ~5 min, both schemes
@@ -87,6 +114,20 @@ Each report starts with the summary over the six jobs (mean AP/NDCG/AUC with
 bootstrap CIs, paired differences vs the keyword baseline and vs SS only),
 then per-job details. The stuffing and fairness tests use seeded samples of
 20 résumés per job (`experiments` in `dataset.json`) to bound API calls.
+
+### Processing time and robustness
+
+```bash
+python manage.py performance_report --dataset evaluation_data/kaggle_tech --similarity tfidf
+python manage.py performance_report --dataset evaluation_data/kaggle_tech --similarity gemini --gemini-extraction
+```
+
+Writes `evaluation_results/kaggle_tech_<similarity>_performance/performance.md`:
+time per stage (extraction + CS/VS/LV per résumé, similarity/embedding per job,
+ranking per job), robustness cases (empty résumé, missing fields, no job
+description, simulated Gemini embedding and extraction failures), and
+`examples/<id>_resume.txt` + `<id>_extracted.json` (input résumé and the JSON
+the app extracts). Timings depend on the machine; report it with the numbers.
 
 The skill catalogue was extended with testing, Java EE, data-science, DevOps
 and web-design terms in a separate commit made before the benchmark existed,
