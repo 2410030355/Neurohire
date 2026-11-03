@@ -28,6 +28,7 @@ import re
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from collections import deque
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -213,8 +214,19 @@ class EmbeddingCache:
         with self._conn() as c:
             c.execute('CREATE TABLE IF NOT EXISTS emb (key TEXT PRIMARY KEY, dim INTEGER, vec BLOB)')
 
+    @contextmanager
     def _conn(self):
-        return sqlite3.connect(self.path, timeout=30)
+        """
+        Open, run one transaction, and CLOSE. (A sqlite3.Connection used as a
+        context manager only commits/rolls back; it stays open and keeps the
+        file locked on Windows, so the file could not be deleted or moved.)
+        """
+        conn = sqlite3.connect(self.path, timeout=30)
+        try:
+            with conn:                 # commit on success, roll back on error
+                yield conn
+        finally:
+            conn.close()
 
     def get_many(self, keys: Sequence[str]) -> Dict[str, np.ndarray]:
         out = {}
