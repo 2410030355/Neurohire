@@ -4,14 +4,17 @@
 |---|---|
 | similarity (SS) | `tfidf` |
 | extraction | `regex (deterministic)` |
+| label scheme | `labels in dataset` |
 | reference date for "Present" | `2023-06-30` |
 | FS weights | `0.6 / 0.4` |
 | VS rule (main) | `first mention, 60-char window` |
 | k | `5` |
 | bootstrap replicates | `2000` |
 | seed | `42` |
-| code version | `b185148` |
-| run at | `2026-11-03 13:48 UTC` |
+| stuffing sample (non-relevant résumés per job) | `all` |
+| fairness sample (résumés per job) | `all` |
+| code version | `7a4a68c` |
+| run at | `2026-11-03 14:14 UTC` |
 
 12 constructed résumés (not real people) for one Frontend Developer role: 7 frontend (React/Vue) labelled relevant, 5 non-frontend (Java backend, Python data, PHP, Android, junior UI) labelled not relevant. Labels were assigned by the authors and are stored in each file's 'Ground Truth Label' line, which is removed before any scoring.
 
@@ -84,7 +87,7 @@ Ties are resolved by averaging over random tie-breaks (not input order).
 
 ### 5. Keyword-stuffing robustness
 
-Each of the 5 non-relevant résumés was copied with the JD's skills (ci/cd, css, cypress, graphql, javascript, jest, react, redux, responsive design, rest api, typescript, vue) appended to its skills list and no supporting experience. Copies are labelled not relevant and added to the pool.
+5 of the 5 non-relevant résumés were copied with the JD's skills (ci/cd, css, cypress, graphql, javascript, jest, react, redux, responsive design, rest api, typescript, vue) appended to its skills list and no supporting experience. Copies are labelled not relevant and added to the pool.
 
 | Method | AP | NDCG@5 | P@5 | AUC | stuffed in top 5 | mean rank gain | mean score gain % |
 |---|---|---|---|---|---|---|---|
@@ -118,7 +121,7 @@ Stuffed pool, 95% CIs and paired difference vs *NeuroHire: SS only* (does eviden
 
 ### 6. Counterfactual fairness (name swaps)
 
-Each résumé re-scored with 8 substituted identities (gender × community); other candidates unchanged.
+12 résumés each re-scored with 8 substituted identities (gender × community); other candidates unchanged.
 
 | Similarity input | mean |ΔFS| | max |ΔFS| | max |Δrank| | swaps changing rank | female − male mean FS |
 |---|---|---|---|---|---|

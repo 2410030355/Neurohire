@@ -3,22 +3,27 @@
     "name": "frontend_12",
     "root": "evaluation_data/frontend_12",
     "description": "12 constructed r\u00e9sum\u00e9s (not real people) for one Frontend Developer role: 7 frontend (React/Vue) labelled relevant, 5 non-frontend (Java backend, Python data, PHP, Android, junior UI) labelled not relevant. Labels were assigned by the authors and are stored in each file's 'Ground Truth Label' line, which is removed before any scoring.",
+    "source": null,
     "n_resumes": 12,
     "jobs": [
       "frontend"
-    ]
+    ],
+    "label_scheme": null
   },
   "config": {
     "similarity (SS)": "tfidf",
     "extraction": "regex (deterministic)",
+    "label scheme": "labels in dataset",
     "reference date for \"Present\"": "2023-06-30",
     "FS weights": "0.6 / 0.4",
     "VS rule (main)": "first mention, 60-char window",
     "k": 5,
     "bootstrap replicates": 2000,
     "seed": 42,
-    "code version": "b185148",
-    "run at": "2026-11-03 13:48 UTC"
+    "stuffing sample (non-relevant r\u00e9sum\u00e9s per job)": "all",
+    "fairness sample (r\u00e9sum\u00e9s per job)": "all",
+    "code version": "7a4a68c",
+    "run at": "2026-11-03 14:14 UTC"
   },
   "jobs": [
     {
@@ -27,6 +32,9 @@
         "title": "Frontend Developer",
         "jd": "We are hiring a Frontend Developer with strong experience in React or Vue.js, modern JavaScript/TypeScript, component-based architecture, state management (Redux, Vuex, or Pinia), REST or GraphQL API integration, and automated frontend testing (Jest or Cypress). Experience with responsive design, CSS frameworks, and CI/CD for frontend deployments is a plus.",
         "jd_note": "Written after the labels, to describe the role the labels encode (React/Vue frontend = relevant). Not an independently sourced job posting.",
+        "source": {},
+        "scheme": null,
+        "relevant_categories": [],
         "n": 12,
         "n_relevant": 7
       },
@@ -924,6 +932,7 @@
           "vue"
         ],
         "n_stuffed": 5,
+        "n_negatives_total": 5,
         "methods": {
           "Keyword (skill overlap)": {
             "AP": 0.4143733250876097,
@@ -1465,6 +1474,7 @@
       "fairness": {
         "redaction on": {
           "variants_per_candidate": 8,
+          "candidates_tested": 12,
           "mean_abs_dFS": 0.0,
           "max_abs_dFS": 0.0,
           "max_abs_rank_change": 0,
@@ -1521,6 +1531,7 @@
         },
         "redaction off": {
           "variants_per_candidate": 8,
+          "candidates_tested": 12,
           "mean_abs_dFS": 0.006666666666666525,
           "max_abs_dFS": 0.03999999999999915,
           "max_abs_rank_change": 0,
@@ -1987,37 +1998,105 @@
     "Keyword (skill overlap)": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "Keyword (term overlap)": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "BM25": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "TF-IDF (corpus)": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "TF-IDF (pairwise) only": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "NeuroHire: SS only": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "NeuroHire: SS+CS": {
       "AP": 0.9821428571428571,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 0.9714285714285714
+    },
+    "NeuroHire: SS+CS+VS": {
+      "AP": 1.0,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 1.0
+    },
+    "NeuroHire: full (SS+CS+VS+LV)": {
+      "AP": 0.9821428571428571,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 0.9714285714285714
+    },
+    "NeuroHire-E: SS+VS_JD": {
+      "AP": 1.0,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 1.0
+    },
+    "NeuroHire-E: full, JD-conditioned evidence": {
+      "AP": 0.9821428571428571,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 0.9714285714285714
+    }
+  },
+  "macro_stuffing": {
+    "Keyword (skill overlap)": {
+      "AP": 0.4143733250876097,
+      "NDCG@5": 0.0,
+      "AUC": 0.5
+    },
+    "Keyword (term overlap)": {
+      "AP": 0.4167352298495124,
+      "NDCG@5": 0.06507771844612126,
+      "AUC": 0.5071428571428571
+    },
+    "BM25": {
+      "AP": 0.8385281385281385,
+      "NDCG@5": 0.8539316501572937,
+      "AUC": 0.8571428571428571
+    },
+    "TF-IDF (corpus)": {
+      "AP": 0.9821428571428571,
+      "NDCG@5": 1.0,
+      "AUC": 0.9857142857142858
+    },
+    "TF-IDF (pairwise) only": {
+      "AP": 0.9478458049886621,
+      "NDCG@5": 1.0,
+      "AUC": 0.9571428571428572
+    },
+    "NeuroHire: SS only": {
+      "AP": 0.9478458049886621,
+      "NDCG@5": 1.0,
+      "AUC": 0.9571428571428572
+    },
+    "NeuroHire: SS+CS": {
+      "AP": 0.9480519480519481,
+      "NDCG@5": 1.0,
+      "AUC": 0.9428571428571428
     },
     "NeuroHire: SS+CS+VS": {
       "AP": 1.0,
@@ -2025,9 +2104,9 @@
       "AUC": 1.0
     },
     "NeuroHire: full (SS+CS+VS+LV)": {
-      "AP": 0.9821428571428571,
+      "AP": 0.936734693877551,
       "NDCG@5": 1.0,
-      "AUC": 0.9714285714285714
+      "AUC": 0.9428571428571428
     },
     "NeuroHire-E: SS+VS_JD": {
       "AP": 1.0,
@@ -2035,9 +2114,9 @@
       "AUC": 1.0
     },
     "NeuroHire-E: full, JD-conditioned evidence": {
-      "AP": 0.9821428571428571,
+      "AP": 0.9478458049886621,
       "NDCG@5": 1.0,
-      "AUC": 0.9714285714285714
+      "AUC": 0.9571428571428572
     }
   }
 }
