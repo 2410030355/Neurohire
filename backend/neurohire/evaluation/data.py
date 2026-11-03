@@ -122,6 +122,11 @@ def load_dataset(root: str, scheme: Optional[str] = None) -> Dataset:
             categories = {row['id']: row['category'] for row in csv.DictReader(f)}
 
     resume_dir = os.path.join(root, spec.get('resume_dir', '.'))
+    if not os.path.isdir(resume_dir):
+        hint = (f"\nRestore them from the source CSV (texts are not committed to git):\n"
+                f"  python manage.py import_resume_csv --csv <path>/{spec['source'].get('csv_file', 'UpdatedResumeDataSet.csv')} --out {root}"
+                if spec.get('source') else '')
+        raise ValueError(f'Résumé folder not found: {resume_dir}{hint}')
     resumes = []
     for name in sorted(os.listdir(resume_dir)):
         stem, ext = os.path.splitext(name)

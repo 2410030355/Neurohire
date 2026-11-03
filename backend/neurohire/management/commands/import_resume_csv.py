@@ -8,11 +8,18 @@ into an evaluation dataset folder:
   categories.csv        id, category, copies_in_source, first_row
   import_report.json    rows read, exact/normalised duplicates removed, per-category counts
 
+If <out>/resumes_manifest.json exists (committed for kaggle_tech), the import
+is checked against it BEFORE anything is written: same source CSV, same 166
+IDs and categories, byte-identical résumé files. A mismatch writes nothing.
+--write-manifest creates the manifest from the current import.
+
 Duplicates are removed after whitespace/case normalisation: the same résumé
 appearing several times would otherwise inflate every ranking metric.
 Mis-decoded UTF-8 ("â€¢" for "•") is repaired.
 """
 import csv
+import hashlib
+import io
 import json
 import os
 import re
@@ -40,6 +47,18 @@ def repair_text(s: str) -> str:
     return s.strip()
 
 
+def sha256_bytes(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def sha256_file(path: str) -> str:
+    with open(path, 'rb') as f:
+        return sha256_bytes(f.read())
+
+
+MANIFEST = 'resumes_manifest.json'
+
+
 def normalise_key(s: str) -> str:
     return re.sub(r'\s+', ' ', s).strip().lower()
 
@@ -52,6 +71,8 @@ class Command(BaseCommand):
         parser.add_argument('--out', required=True)
         parser.add_argument('--text-col', default='Resume')
         parser.add_argument('--category-col', default='Category')
+        parser.add_argument('--write-manifest', action='store_true',
+                            help=f'write {MANIFEST} (SHA-256 of the source CSV and every output file)')
 
     def handle(self, *args, **o):
         if not os.path.exists(o['csv']):
@@ -74,25 +95,76 @@ class Command(BaseCommand):
                     continue
                 unique[key] = {'text': text, 'category': cat, 'copies': 1, 'first_row': i}
 
-        res_dir = os.path.join(o['out'], 'resumes')
-        os.makedirs(res_dir, exist_ok=True)
-        with open(os.path.join(o['out'], 'categories.csv'), 'w', newline='', encoding='utf-8') as cf:
-            w = csv.writer(cf)
-            w.writerow(['id', 'category', 'copies_in_source', 'first_row'])
-            for n, item in enumerate(unique.values(), start=1):
-                rid = f'R{n:04d}'
-                with open(os.path.join(res_dir, f'{rid}.txt'), 'w', encoding='utf-8') as rf:
-                    rf.write(item['text'] + '\n')
-                w.writerow([rid, item['category'], item['copies'], item['first_row']])
+        # Build every output in memory first, so it can be verified before writing.
+        files = {}
+        cat_buf = io.StringIO(newline='')
+        w = csv.writer(cat_buf)
+        w.writerow(['id', 'category', 'copies_in_source', 'first_row'])
+        for n, item in enumerate(unique.values(), start=1):
+            rid = f'R{n:04d}'
+            files[f'resumes/{rid}.txt'] = (item['text'] + '\n').encode('utf-8')
+            w.writerow([rid, item['category'], item['copies'], item['first_row']])
+        files['categories.csv'] = cat_buf.getvalue().encode('utf-8')
 
+        source_sha = sha256_file(o['csv'])
+        manifest_path = os.path.join(o['out'], MANIFEST)
+        source_name = os.path.basename(o['csv'])
+        if os.path.exists(manifest_path) and not o['write_manifest']:
+            with open(manifest_path, encoding='utf-8') as f:
+                m = json.load(f)
+            if m.get('source_csv_sha256') == source_sha:      # same file, maybe renamed by a download
+                source_name = m.get('source_csv_name', source_name)
         report = {
-            'source_csv': os.path.basename(o['csv']), 'rows_read': rows, 'unique_resumes': len(unique),
+            'source_csv': source_name, 'rows_read': rows, 'unique_resumes': len(unique),
             'duplicates_removed': rows - len(unique),
             'unique_per_category': dict(sorted(Counter(v['category'] for v in unique.values()).items())),
             'rows_per_category': dict(sorted(Counter(v['category'] for v in unique.values()
                                                      for _ in range(v['copies'])).items())),
         }
-        with open(os.path.join(o['out'], 'import_report.json'), 'w', encoding='utf-8') as f:
-            json.dump(report, f, indent=2)
+        files['import_report.json'] = json.dumps(report, indent=2).encode('utf-8')
+
+        if os.path.exists(manifest_path) and not o['write_manifest']:
+            self._verify(manifest_path, source_sha, files)
+
+        os.makedirs(os.path.join(o['out'], 'resumes'), exist_ok=True)
+        for rel, data in files.items():
+            with open(os.path.join(o['out'], rel), 'wb') as f:
+                f.write(data)
+        if o['write_manifest']:
+            manifest = {
+                'description': 'SHA-256 of the source CSV and of every file import_resume_csv writes. '
+                               'The résumé texts are not committed; this manifest proves a restore is exact.',
+                'source_csv_name': source_name, 'source_csv_sha256': source_sha, 'resume_count': len(unique),
+                'files': {rel: sha256_bytes(data) for rel, data in sorted(files.items())},
+            }
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, indent=2)
+                f.write('\n')
+            self.stdout.write(f'Wrote {manifest_path}')
         self.stdout.write(self.style.SUCCESS(
             f"{rows} rows → {len(unique)} unique résumés ({rows - len(unique)} duplicates removed) in {o['out']}"))
+
+    def _verify(self, manifest_path, source_sha, files):
+        with open(manifest_path, encoding='utf-8') as f:
+            m = json.load(f)
+        problems = []
+        if m.get('source_csv_sha256') != source_sha:
+            problems.append(f"source CSV checksum differs (expected {m.get('source_csv_sha256', '?')[:12]}…, "
+                            f'got {source_sha[:12]}…) — a different version of the CSV')
+        expected = m.get('files', {})
+        got = {rel: sha256_bytes(data) for rel, data in files.items()}
+        missing = sorted(set(expected) - set(got))
+        extra = sorted(set(got) - set(expected))
+        changed = sorted(rel for rel in set(expected) & set(got) if expected[rel] != got[rel])
+        if missing:
+            problems.append(f'{len(missing)} expected file(s) not produced, e.g. {missing[:3]}')
+        if extra:
+            problems.append(f'{len(extra)} unexpected file(s), e.g. {extra[:3]}')
+        if changed:
+            problems.append(f'{len(changed)} file(s) with different content, e.g. {changed[:3]}')
+        if problems:
+            raise CommandError('Import does not match ' + MANIFEST + '; nothing was written.\n  - '
+                               + '\n  - '.join(problems))
+        self.stdout.write(self.style.SUCCESS(
+            f"Verified against {MANIFEST}: source CSV and all {m.get('resume_count')} résumés, "
+            'categories.csv and import_report.json are identical.'))
