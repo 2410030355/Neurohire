@@ -1,0 +1,19 @@
+Wipro
+Job title: Java Fullstack Developer
+Location: Bengaluru, India
+Experience: 3–5 years listed in the posting.
+
+Job description summary:
+
+The role involves developing and maintaining enterprise applications using Java and Spring Boot. The developer is expected to work on backend services, REST API development, frontend integration and database connectivity.
+
+Key responsibilities:
+- Gather and understand client requirements.
+- Develop application modules using Java and Spring Boot.
+- Design and integrate REST APIs.
+- Work with Angular, TypeScript and relational databases.
+- Perform unit testing and participate in user acceptance testing.
+- Follow secure coding and software development practices.
+- Collaborate with cross-functional teams.
+- Support application implementation and documentation.
+Required skills: Java, Spring Boot, REST APIs, Angular, TypeScript, PostgreSQL, SQL, unit testing, TDD, CI/CD.

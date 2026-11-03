@@ -1,0 +1,19 @@
+Viyona Fintech
+Job title: Frontend Engineer (React)
+Location: Hyderabad, India
+Experience: Not specified on the retrieved posting.
+
+Job description summary:
+
+The role involves building and maintaining enterprise dashboards for banking partners and consumer-facing application interfaces. The developer works with React, TypeScript and an established design system to deliver accessible, responsive and high-performance web experiences.
+
+Key responsibilities:
+- Develop frontend applications using React.
+- Build and maintain enterprise dashboards.
+- Develop consumer-facing web application flows.
+- Work with product and design teams.
+- Contribute to reusable component libraries.
+- Improve frontend accessibility and performance.
+- Maintain consistency across web and mobile web interfaces.
+- Follow frontend development standards.
+Required skills: React, TypeScript, frontend development, component libraries, UI development, accessibility, responsive design and performance optimization.

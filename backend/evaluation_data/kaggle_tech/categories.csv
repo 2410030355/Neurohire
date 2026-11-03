@@ -1,0 +1,167 @@
+id,category,copies_in_source,first_row
+R0001,Data Science,4,0
+R0002,Data Science,4,1
+R0003,Data Science,4,2
+R0004,Data Science,4,3
+R0005,Data Science,4,4
+R0006,Data Science,4,5
+R0007,Data Science,4,6
+R0008,Data Science,4,7
+R0009,Data Science,4,8
+R0010,Data Science,4,9
+R0011,HR,4,40
+R0012,HR,4,41
+R0013,HR,4,42
+R0014,HR,8,43
+R0015,HR,4,45
+R0016,HR,4,46
+R0017,HR,4,47
+R0018,HR,4,48
+R0019,HR,4,49
+R0020,HR,4,50
+R0021,Advocate,2,84
+R0022,Advocate,2,85
+R0023,Advocate,2,86
+R0024,Advocate,2,87
+R0025,Advocate,2,88
+R0026,Advocate,2,89
+R0027,Advocate,2,90
+R0028,Advocate,2,91
+R0029,Advocate,2,92
+R0030,Advocate,2,93
+R0031,Arts,6,104
+R0032,Arts,6,105
+R0033,Arts,6,106
+R0034,Arts,6,107
+R0035,Arts,6,108
+R0036,Arts,6,109
+R0037,Web Designing,18,140
+R0038,Web Designing,9,141
+R0039,Web Designing,9,143
+R0040,Web Designing,9,144
+R0041,Mechanical Engineer,8,185
+R0042,Mechanical Engineer,8,186
+R0043,Mechanical Engineer,8,187
+R0044,Mechanical Engineer,8,188
+R0045,Mechanical Engineer,8,189
+R0046,Sales,8,225
+R0047,Sales,8,226
+R0048,Sales,8,227
+R0049,Sales,8,228
+R0050,Sales,8,229
+R0051,Health and fitness,5,265
+R0052,Health and fitness,5,266
+R0053,Health and fitness,5,267
+R0054,Health and fitness,5,268
+R0055,Health and fitness,5,269
+R0056,Health and fitness,5,270
+R0057,Civil Engineer,4,295
+R0058,Civil Engineer,4,296
+R0059,Civil Engineer,4,297
+R0060,Civil Engineer,4,298
+R0061,Civil Engineer,4,299
+R0062,Civil Engineer,4,300
+R0063,Java Developer,6,319
+R0064,Java Developer,6,320
+R0065,Java Developer,6,321
+R0066,Java Developer,6,322
+R0067,Java Developer,6,323
+R0068,Java Developer,6,324
+R0069,Java Developer,12,325
+R0070,Java Developer,6,327
+R0071,Java Developer,6,328
+R0072,Java Developer,6,329
+R0073,Java Developer,6,330
+R0074,Java Developer,6,331
+R0075,Java Developer,6,332
+R0076,Business Analyst,2,403
+R0077,Business Analyst,2,404
+R0078,Business Analyst,6,405
+R0079,Business Analyst,6,406
+R0080,Business Analyst,6,407
+R0081,Business Analyst,6,408
+R0082,SAP Developer,4,431
+R0083,SAP Developer,4,432
+R0084,SAP Developer,4,433
+R0085,SAP Developer,4,434
+R0086,SAP Developer,4,435
+R0087,SAP Developer,4,436
+R0088,Automation Testing,2,455
+R0089,Automation Testing,2,456
+R0090,Automation Testing,2,457
+R0091,Automation Testing,8,458
+R0092,Automation Testing,8,459
+R0093,Automation Testing,2,460
+R0094,Automation Testing,2,461
+R0095,Electrical Engineering,6,481
+R0096,Electrical Engineering,6,482
+R0097,Electrical Engineering,6,483
+R0098,Electrical Engineering,6,484
+R0099,Electrical Engineering,6,485
+R0100,Operations Manager,10,511
+R0101,Operations Manager,10,512
+R0102,Operations Manager,10,513
+R0103,Operations Manager,10,514
+R0104,Python Developer,8,551
+R0105,Python Developer,8,552
+R0106,Python Developer,8,553
+R0107,Python Developer,8,554
+R0108,Python Developer,8,555
+R0109,Python Developer,8,556
+R0110,DevOps Engineer,17,599
+R0111,DevOps Engineer,17,600
+R0112,DevOps Engineer,17,601
+R0113,DevOps Engineer,1,602
+R0114,DevOps Engineer,1,603
+R0115,DevOps Engineer,1,604
+R0116,DevOps Engineer,1,605
+R0117,Network Security Engineer,5,654
+R0118,Network Security Engineer,5,655
+R0119,Network Security Engineer,5,656
+R0120,Network Security Engineer,5,657
+R0121,Network Security Engineer,5,658
+R0122,PMO,10,679
+R0123,PMO,10,680
+R0124,PMO,10,681
+R0125,Database,3,709
+R0126,Database,3,710
+R0127,Database,3,711
+R0128,Database,3,712
+R0129,Database,3,713
+R0130,Database,3,714
+R0131,Database,3,715
+R0132,Database,3,716
+R0133,Database,3,717
+R0134,Database,3,718
+R0135,Database,3,719
+R0136,Hadoop,6,742
+R0137,Hadoop,6,743
+R0138,Hadoop,6,744
+R0139,Hadoop,6,745
+R0140,Hadoop,6,746
+R0141,Hadoop,6,747
+R0142,Hadoop,6,748
+R0143,ETL Developer,8,784
+R0144,ETL Developer,8,785
+R0145,ETL Developer,8,786
+R0146,ETL Developer,8,787
+R0147,ETL Developer,8,788
+R0148,DotNet Developer,4,824
+R0149,DotNet Developer,4,825
+R0150,DotNet Developer,4,826
+R0151,DotNet Developer,4,827
+R0152,DotNet Developer,4,828
+R0153,DotNet Developer,4,829
+R0154,DotNet Developer,4,830
+R0155,Blockchain,8,852
+R0156,Blockchain,8,853
+R0157,Blockchain,8,854
+R0158,Blockchain,8,855
+R0159,Blockchain,8,856
+R0160,Testing,10,892
+R0161,Testing,10,893
+R0162,Testing,10,894
+R0163,Testing,10,895
+R0164,Testing,10,896
+R0165,Testing,10,897
+R0166,Testing,10,898

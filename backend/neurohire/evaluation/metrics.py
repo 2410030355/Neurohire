@@ -118,7 +118,7 @@ def evaluate_scores(scores: Sequence[float], labels: Sequence[float], k: int = 5
 def stratified_bootstrap(method_scores: Dict[str, Sequence[float]], labels: Sequence[float],
                          k: int = 5, n_boot: int = 2000, seed: int = 42,
                          metrics: Sequence[str] = ('AP', 'NDCG@5', 'P@5', 'AUC'),
-                         reference: Optional[str] = None) -> Dict:
+                         reference: Optional[str] = None, return_draws: bool = False) -> Dict:
     """
     Resample candidates with replacement within each relevance class (so every
     replicate has the same number of relevant / non-relevant candidates), score
@@ -161,6 +161,28 @@ def stratified_bootstrap(method_scores: Dict[str, Sequence[float]], labels: Sequ
                 d = np.array(draws[m][x]) - np.array(draws[reference][x])
                 p = 2 * min((d <= 0).mean(), (d >= 0).mean())
                 out['diff'][m][x] = {'mean': float(d.mean()), 'ci': ci(d), 'p': float(min(1.0, p))}
+    if return_draws:
+        out['_draws'] = draws
+    return out
+
+
+def summarize_draws(draws: Dict[str, Dict[str, List[float]]], references: Sequence[str]) -> Dict:
+    """CIs and paired differences from replicate draws (e.g. macro-averaged over jobs)."""
+    def ci(v):
+        return [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))]
+    out = {'ci': {m: {x: ci(v) for x, v in d.items()} for m, d in draws.items()}, 'diff': {}}
+    for ref in references:
+        if ref not in draws:
+            continue
+        out['diff'][ref] = {}
+        for m, d in draws.items():
+            if m == ref:
+                continue
+            out['diff'][ref][m] = {}
+            for x, v in d.items():
+                diff = np.array(v) - np.array(draws[ref][x])
+                p = 2 * min((diff <= 0).mean(), (diff >= 0).mean())
+                out['diff'][ref][m][x] = {'mean': float(diff.mean()), 'ci': ci(diff), 'p': float(min(1.0, p))}
     return out
 
 

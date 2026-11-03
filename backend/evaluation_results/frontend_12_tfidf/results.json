@@ -3,22 +3,27 @@
     "name": "frontend_12",
     "root": "evaluation_data/frontend_12",
     "description": "12 constructed r\u00e9sum\u00e9s (not real people) for one Frontend Developer role: 7 frontend (React/Vue) labelled relevant, 5 non-frontend (Java backend, Python data, PHP, Android, junior UI) labelled not relevant. Labels were assigned by the authors and are stored in each file's 'Ground Truth Label' line, which is removed before any scoring.",
+    "source": null,
     "n_resumes": 12,
     "jobs": [
       "frontend"
-    ]
+    ],
+    "label_scheme": null
   },
   "config": {
     "similarity (SS)": "tfidf",
     "extraction": "regex (deterministic)",
+    "label scheme": "labels in dataset",
     "reference date for \"Present\"": "2023-06-30",
     "FS weights": "0.6 / 0.4",
     "VS rule (main)": "first mention, 60-char window",
     "k": 5,
     "bootstrap replicates": 2000,
     "seed": 42,
-    "code version": "146181b",
-    "run at": "2026-11-01 10:58 UTC"
+    "stuffing sample (non-relevant r\u00e9sum\u00e9s per job)": "all",
+    "fairness sample (r\u00e9sum\u00e9s per job)": "all",
+    "code version": "7a4a68c",
+    "run at": "2026-11-03 14:14 UTC"
   },
   "jobs": [
     {
@@ -27,6 +32,9 @@
         "title": "Frontend Developer",
         "jd": "We are hiring a Frontend Developer with strong experience in React or Vue.js, modern JavaScript/TypeScript, component-based architecture, state management (Redux, Vuex, or Pinia), REST or GraphQL API integration, and automated frontend testing (Jest or Cypress). Experience with responsive design, CSS frameworks, and CI/CD for frontend deployments is a plus.",
         "jd_note": "Written after the labels, to describe the role the labels encode (React/Vue frontend = relevant). Not an independently sourced job posting.",
+        "source": {},
+        "scheme": null,
+        "relevant_categories": [],
         "n": 12,
         "n_relevant": 7
       },
@@ -832,18 +840,18 @@
           "MRR": 1.0,
           "AUC": 0.9714285714285714,
           "ties": 0,
-          "mean_VS": 34.28333333333333
+          "mean_VS": 34.14416666666666
         },
         "any-mention": {
           "P@5": 1.0,
           "R@5": 0.7142857142857143,
           "NDCG@5": 1.0,
-          "AP": 0.9325396825396826,
-          "R-Prec": 0.7142857142857143,
+          "AP": 0.9478458049886621,
+          "R-Prec": 0.8571428571428571,
           "MRR": 1.0,
-          "AUC": 0.8857142857142857,
+          "AUC": 0.9142857142857143,
           "ties": 0,
-          "mean_VS": 78.56166666666667
+          "mean_VS": 77.17333333333333
         }
       },
       "evidence_bootstrap": {
@@ -866,7 +874,7 @@
           },
           "NeuroHire: full, VS any-mention": {
             "AP": [
-              0.7869614512471655,
+              0.8083333333333333,
               1.0
             ],
             "NDCG@5": [
@@ -882,28 +890,28 @@
         "diff": {
           "NeuroHire: full, VS any-mention": {
             "AP": {
-              "mean": -0.05019788445681302,
+              "mean": -0.03434185219542363,
               "ci": [
-                -0.17260655019583593,
+                -0.12414965986394566,
                 0.0
               ],
-              "p": 0.475
+              "p": 0.594
             },
             "NDCG@5": {
-              "mean": -0.04595080908831683,
+              "mean": -0.03119441870767412,
               "ci": [
-                -0.2772734273550481,
+                -0.169580102636808,
                 0.0
               ],
               "p": 1.0
             },
             "AUC": {
-              "mean": -0.08632857142857142,
+              "mean": -0.0578,
               "ci": [
-                -0.2857142857142858,
+                -0.20071428571428573,
                 0.0
               ],
-              "p": 0.475
+              "p": 0.594
             }
           }
         }
@@ -924,6 +932,7 @@
           "vue"
         ],
         "n_stuffed": 5,
+        "n_negatives_total": 5,
         "methods": {
           "Keyword (skill overlap)": {
             "AP": 0.4143733250876097,
@@ -994,8 +1003,8 @@
             "P@5": 1.0,
             "AUC": 1.0,
             "stuffed_in_top5": 0,
-            "mean_rank_gain": 3.0,
-            "mean_score_gain_pct": 10.92296719177865
+            "mean_rank_gain": 3.4,
+            "mean_score_gain_pct": 11.133824598375693
           },
           "NeuroHire: full (SS+CS+VS+LV)": {
             "AP": 0.936734693877551,
@@ -1004,7 +1013,7 @@
             "AUC": 0.9428571428571428,
             "stuffed_in_top5": 0,
             "mean_rank_gain": 2.6,
-            "mean_score_gain_pct": 15.012414495916914
+            "mean_score_gain_pct": 15.164563036672552
           },
           "NeuroHire-E: SS+VS_JD": {
             "AP": 1.0,
@@ -1448,14 +1457,14 @@
           }
         },
         "stuffed_VS": {
-          "Candidate_02_Priya_Venkataraman__stuffed": 4.76,
+          "Candidate_02_Priya_Venkataraman__stuffed": 4.35,
           "Candidate_05_Karthik_Reddy__stuffed": 5.0,
           "Candidate_07_Arun_Balasubramanian__stuffed": 0.0,
           "Candidate_09_Suresh_Babu__stuffed": 0.0,
           "Candidate_11_Manoj_Kumar__stuffed": 0.0
         },
         "original_VS": {
-          "Candidate_02_Priya_Venkataraman": 10.0,
+          "Candidate_02_Priya_Venkataraman": 8.33,
           "Candidate_05_Karthik_Reddy": 11.11,
           "Candidate_07_Arun_Balasubramanian": 0.0,
           "Candidate_09_Suresh_Babu": 16.67,
@@ -1465,20 +1474,21 @@
       "fairness": {
         "redaction on": {
           "variants_per_candidate": 8,
+          "candidates_tested": 12,
           "mean_abs_dFS": 0.0,
           "max_abs_dFS": 0.0,
           "max_abs_rank_change": 0,
           "share_rank_changed": 0.0,
           "gender_gap_mean_FS": 0.0,
           "group_mean_FS": {
-            "male / north": 36.06666666666667,
-            "female / north": 36.06666666666667,
-            "male / south": 36.06666666666667,
-            "female / south": 36.06666666666667,
-            "male / muslim": 36.06666666666667,
-            "female / muslim": 36.06666666666667,
-            "male / christian": 36.06666666666667,
-            "female / christian": 36.06666666666667
+            "male / north": 36.04833333333334,
+            "female / north": 36.04833333333334,
+            "male / south": 36.04833333333334,
+            "female / south": 36.04833333333334,
+            "male / muslim": 36.04833333333334,
+            "female / muslim": 36.04833333333334,
+            "male / christian": 36.04833333333334,
+            "female / christian": 36.04833333333334
           },
           "per_candidate": {
             "Candidate_01_Arjun_Sharma": {
@@ -1521,20 +1531,21 @@
         },
         "redaction off": {
           "variants_per_candidate": 8,
+          "candidates_tested": 12,
           "mean_abs_dFS": 0.006666666666666525,
           "max_abs_dFS": 0.03999999999999915,
           "max_abs_rank_change": 0,
           "share_rank_changed": 0.0,
           "gender_gap_mean_FS": 0.0,
           "group_mean_FS": {
-            "male / north": 35.6775,
-            "female / north": 35.6775,
-            "male / south": 35.6775,
-            "female / south": 35.6775,
-            "male / muslim": 35.6775,
-            "female / muslim": 35.6775,
-            "male / christian": 35.6775,
-            "female / christian": 35.6775
+            "male / north": 35.65916666666667,
+            "female / north": 35.65916666666667,
+            "male / south": 35.65916666666667,
+            "female / south": 35.65916666666667,
+            "male / muslim": 35.65916666666667,
+            "female / muslim": 35.65916666666667,
+            "male / christian": 35.65916666666667,
+            "female / christian": 35.65916666666667
           },
           "per_candidate": {
             "Candidate_01_Arjun_Sharma": {
@@ -1619,22 +1630,22 @@
           "id": "Candidate_02_Priya_Venkataraman",
           "label": 0,
           "rank_full": 9,
-          "FS": 25.63,
+          "FS": 25.41,
           "SS": 8.8,
           "CS": 100.0,
-          "VS": 10.0,
+          "VS": 8.33,
           "LV": 42.62,
           "LV_raw": 0.8136,
-          "AS": 50.87,
+          "AS": 50.32,
           "fit": "Low",
           "VS_JD": 8.33,
           "FS_E": 25.41,
           "rank_E": 9,
-          "VS_any": 70.0,
+          "VS_any": 66.67,
           "experience_dated": 4.9,
           "experience_claimed": 5.0,
-          "n_skills": 10,
-          "skills": "docker java junit kafka kubernetes microservices mysql rest api spring boot unit testing",
+          "n_skills": 12,
+          "skills": "docker hibernate java junit kafka kubernetes maven microservices mysql rest api spring boot unit testing",
           "cs_flags": "",
           "score[Keyword (skill overlap)]": 0.08333333333333333,
           "score[Keyword (term overlap)]": 0.23529411764705882,
@@ -1643,8 +1654,8 @@
           "score[TF-IDF (pairwise) only]": 8.8,
           "score[NeuroHire: SS only]": 8.8,
           "score[NeuroHire: SS+CS]": 45.28,
-          "score[NeuroHire: SS+CS+VS]": 27.28,
-          "score[NeuroHire: full (SS+CS+VS+LV)]": 25.63,
+          "score[NeuroHire: SS+CS+VS]": 26.94,
+          "score[NeuroHire: full (SS+CS+VS+LV)]": 25.41,
           "score[NeuroHire-E: SS+VS_JD]": 8.61,
           "score[NeuroHire-E: full, JD-conditioned evidence]": 25.41
         },
@@ -1927,11 +1938,11 @@
           "VS_JD": 8.33,
           "FS_E": 25.32,
           "rank_E": 10,
-          "VS_any": 80.0,
+          "VS_any": 66.67,
           "experience_dated": null,
           "experience_claimed": 1.0,
-          "n_skills": 5,
-          "skills": "bootstrap css figma html jquery",
+          "n_skills": 6,
+          "skills": "bootstrap css figma html jquery photoshop",
           "cs_flags": "",
           "score[Keyword (skill overlap)]": 0.08333333333333333,
           "score[Keyword (term overlap)]": 0.08823529411764706,
@@ -1979,7 +1990,7 @@
           "score[NeuroHire-E: full, JD-conditioned evidence]": 45.92
         }
       ],
-      "similarity_backend_calls": 100,
+      "similarity_backend_calls": 5,
       "cs_constant": false
     }
   ],
@@ -1987,37 +1998,105 @@
     "Keyword (skill overlap)": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "Keyword (term overlap)": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "BM25": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "TF-IDF (corpus)": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "TF-IDF (pairwise) only": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "NeuroHire: SS only": {
       "AP": 1.0,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 1.0
     },
     "NeuroHire: SS+CS": {
       "AP": 0.9821428571428571,
       "NDCG@5": 1.0,
+      "P@5": 1.0,
       "AUC": 0.9714285714285714
+    },
+    "NeuroHire: SS+CS+VS": {
+      "AP": 1.0,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 1.0
+    },
+    "NeuroHire: full (SS+CS+VS+LV)": {
+      "AP": 0.9821428571428571,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 0.9714285714285714
+    },
+    "NeuroHire-E: SS+VS_JD": {
+      "AP": 1.0,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 1.0
+    },
+    "NeuroHire-E: full, JD-conditioned evidence": {
+      "AP": 0.9821428571428571,
+      "NDCG@5": 1.0,
+      "P@5": 1.0,
+      "AUC": 0.9714285714285714
+    }
+  },
+  "macro_stuffing": {
+    "Keyword (skill overlap)": {
+      "AP": 0.4143733250876097,
+      "NDCG@5": 0.0,
+      "AUC": 0.5
+    },
+    "Keyword (term overlap)": {
+      "AP": 0.4167352298495124,
+      "NDCG@5": 0.06507771844612126,
+      "AUC": 0.5071428571428571
+    },
+    "BM25": {
+      "AP": 0.8385281385281385,
+      "NDCG@5": 0.8539316501572937,
+      "AUC": 0.8571428571428571
+    },
+    "TF-IDF (corpus)": {
+      "AP": 0.9821428571428571,
+      "NDCG@5": 1.0,
+      "AUC": 0.9857142857142858
+    },
+    "TF-IDF (pairwise) only": {
+      "AP": 0.9478458049886621,
+      "NDCG@5": 1.0,
+      "AUC": 0.9571428571428572
+    },
+    "NeuroHire: SS only": {
+      "AP": 0.9478458049886621,
+      "NDCG@5": 1.0,
+      "AUC": 0.9571428571428572
+    },
+    "NeuroHire: SS+CS": {
+      "AP": 0.9480519480519481,
+      "NDCG@5": 1.0,
+      "AUC": 0.9428571428571428
     },
     "NeuroHire: SS+CS+VS": {
       "AP": 1.0,
@@ -2025,9 +2104,9 @@
       "AUC": 1.0
     },
     "NeuroHire: full (SS+CS+VS+LV)": {
-      "AP": 0.9821428571428571,
+      "AP": 0.936734693877551,
       "NDCG@5": 1.0,
-      "AUC": 0.9714285714285714
+      "AUC": 0.9428571428571428
     },
     "NeuroHire-E: SS+VS_JD": {
       "AP": 1.0,
@@ -2035,9 +2114,9 @@
       "AUC": 1.0
     },
     "NeuroHire-E: full, JD-conditioned evidence": {
-      "AP": 0.9821428571428571,
+      "AP": 0.9478458049886621,
       "NDCG@5": 1.0,
-      "AUC": 0.9714285714285714
+      "AUC": 0.9571428571428572
     }
   }
 }

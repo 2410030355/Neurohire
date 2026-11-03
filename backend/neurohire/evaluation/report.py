@@ -31,8 +31,17 @@ def _ci(ci):
 def job_markdown(r: Dict, k: int) -> str:
     j, main, boot = r['job'], r['main'], r['bootstrap']
     lines = [f"## Job: {j['title']} (`{j['id']}`)",
-             f"{j['n']} candidates, {j['n_relevant']} labelled relevant.",
-             '', f"**Job description.** {j['jd']}", '']
+             f"{j['n']} candidates, {j['n_relevant']} labelled relevant."]
+    if j.get('scheme'):
+        lines += [f"Label scheme **{j['scheme']}**: relevant = curator category in "
+                  f"{', '.join(j['relevant_categories'])}."]
+    src = j.get('source') or {}
+    if src.get('url'):
+        lines += [f"Job posting: {src.get('employer', '')} — {src.get('posting_title', j['title'])}, "
+                  f"<{src['url']}>" + (f" (accessed {src['accessed']})" if src.get('accessed') else '') + '.']
+        lines += ['', '<details><summary>Job description used</summary>', '', j['jd'], '', '</details>', '']
+    else:
+        lines += ['', f"**Job description.** {j['jd']}", '']
     if j.get('jd_note'):
         lines += [f"*JD provenance:* {j['jd_note']}", '']
     if r.get('cs_constant'):
@@ -70,7 +79,7 @@ def job_markdown(r: Dict, k: int) -> str:
 
     s = r['stuffing']
     lines += ['### 5. Keyword-stuffing robustness', '',
-              f"Each of the {s['n_stuffed']} non-relevant résumés was copied with the JD's skills "
+              f"{s['n_stuffed']} of the {s.get('n_negatives_total', s['n_stuffed'])} non-relevant résumés were copied with the JD's skills "
               f"({', '.join(s['stuffed_skills'])}) appended to its skills list and no supporting experience. "
               'Copies are labelled not relevant and added to the pool.', '']
     rows = [[m, _f(e['AP']), _f(e[f'NDCG@{k}']), _f(e[f'P@{k}']), _f(e['AUC']), e[f'stuffed_in_top{k}'],
@@ -89,8 +98,10 @@ def job_markdown(r: Dict, k: int) -> str:
                   '(does evidence add robustness beyond semantic similarity?):', '',
                   _table(['Method', 'AP [95% CI]', 'ΔAP vs SS only [95% CI] (p)'], rows), '']
 
+    n_tested = next(iter(r['fairness'].values())).get('candidates_tested')
     lines += ['### 6. Counterfactual fairness (name swaps)', '',
-              'Each résumé re-scored with 8 substituted identities (gender × community); other candidates unchanged.', '']
+              f'{n_tested} résumés each re-scored with 8 substituted identities (gender × community); '
+              'other candidates unchanged.', '']
     rows = []
     for mode, f in r['fairness'].items():
         rows.append([mode, _f(f['mean_abs_dFS'], 3), _f(f['max_abs_dFS'], 3), f['max_abs_rank_change'],
@@ -104,6 +115,10 @@ def job_markdown(r: Dict, k: int) -> str:
               f"points on average (max {_f(lk['max_SS_change_if_label_left_in'])}). {lk['note']}", '']
 
     lines += ['### 8. Per-candidate scores (full model)', '']
+    if len(r['per_candidate']) > 40:
+        lines += [f"{len(r['per_candidate'])} candidates — see `per_candidate_{j['id']}.csv` "
+                  '(scores of every method, components, skills).', '']
+        return '\n'.join(lines)
     rows = [[c['id'], c['label'], c['rank_full'], _f(c['FS'], 1), _f(c['SS'], 1), _f(c['CS'], 0), _f(c['VS'], 1),
              _f(c['LV'], 1), _f(c['AS'], 1), _f(c['VS_JD'], 1), c['rank_E'], _f(c['FS_E'], 1),
              _f(c['experience_dated'], 1), _f(c['experience_claimed'], 1), c['n_skills']]
@@ -111,6 +126,35 @@ def job_markdown(r: Dict, k: int) -> str:
     lines += [_table(['Candidate', 'label', 'rank', 'FS', 'SS', 'CS', 'VS', 'LV', 'AS', 'VS_JD', 'rank (E)', 'FS (E)',
                       'yrs (dates)', 'yrs (claimed)', '#skills'], rows), '']
     return '\n'.join(lines)
+
+
+def macro_markdown(results: Dict, k: int) -> List[str]:
+    """Summary across jobs: means, bootstrap CIs, paired differences."""
+    mb, n_jobs = results.get('macro_bootstrap', {}), len(results['jobs'])
+    out = [f'## Summary over {n_jobs} jobs (macro average)', '',
+           'Each bootstrap replicate resamples candidates within every job and averages over jobs.', '']
+    rows = []
+    for m, v in results['macro'].items():
+        ci = mb.get('ci', {}).get(m, {})
+        rows.append([m, f"{_f(v['AP'])} {_ci(ci.get('AP'))}", f"{_f(v[f'NDCG@{k}'])} {_ci(ci.get(f'NDCG@{k}'))}",
+                     _f(v[f'P@{k}']), f"{_f(v['AUC'])} {_ci(ci.get('AUC'))}"])
+    out += [_table(['Method', 'MAP [95% CI]', f'mean NDCG@{k} [95% CI]', f'mean P@{k}', 'mean AUC [95% CI]'], rows), '']
+    for ref, diffs in mb.get('diff', {}).items():
+        out += [f'Paired difference vs **{ref}** (Δ, 95% CI, two-sided bootstrap p):', '']
+        out += [_table(['Method', 'ΔMAP', f'ΔNDCG@{k}', 'ΔAUC'],
+                       [[m] + [f"{_f(d[x]['mean'], 3)} {_ci(d[x]['ci'])} (p={_f(d[x]['p'], 3)})"
+                               for x in ('AP', f'NDCG@{k}', 'AUC')] for m, d in diffs.items()]), '']
+    ms, msb = results.get('macro_stuffing', {}), results.get('macro_stuffing_bootstrap', {})
+    if ms:
+        out += ['### Keyword stuffing, averaged over jobs', '']
+        rows = [[m, f"{_f(v['AP'])} {_ci(msb.get('ci', {}).get(m, {}).get('AP'))}", _f(v['AUC'])] for m, v in ms.items()]
+        out += [_table(['Method', 'MAP with stuffed copies [95% CI]', 'mean AUC'], rows), '']
+        for ref, diffs in msb.get('diff', {}).items():
+            out += [f'Stuffed pool, paired difference vs **{ref}**:', '',
+                    _table(['Method', 'ΔMAP [95% CI] (p)'],
+                           [[m, f"{_f(d['AP']['mean'], 3)} {_ci(d['AP']['ci'])} (p={_f(d['AP']['p'], 3)})"]
+                            for m, d in diffs.items()]), '']
+    return out
 
 
 def write_outputs(results: Dict, out_dir: str, k: int) -> List[str]:
@@ -136,12 +180,10 @@ def write_outputs(results: Dict, out_dir: str, k: int) -> List[str]:
           _table(['Setting', 'Value'], [[k_, f'`{v}`'] for k_, v in cfg.items()]), '']
     if results['dataset'].get('description'):
         md += [results['dataset']['description'], '']
+    if len(results['jobs']) > 1:
+        md += macro_markdown(results, k) + ['---', '', '# Per-job results', '']
     for jr in results['jobs']:
         md += [job_markdown(jr, k), '']
-    if len(results['jobs']) > 1:
-        md += ['## Macro average over jobs', '', _table(
-            ['Method', 'mean AP', f'mean NDCG@{k}', 'mean AUC'],
-            [[m, _f(v['AP']), _f(v[f'NDCG@{k}']), _f(v['AUC'])] for m, v in results['macro'].items()]), '']
     p = os.path.join(out_dir, 'report.md')
     with open(p, 'w', encoding='utf-8') as f:
         f.write('\n'.join(md))

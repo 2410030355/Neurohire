@@ -44,7 +44,57 @@ Available in the app via `POST /api/rank/ {"vs_variant": "jd"}`.
 
 ## Datasets
 
-`frontend_12/` — 12 constructed résumés (no real people), one job, labels by
+### `kaggle_tech/` — multi-role benchmark (main experiment)
+
+166 unique résumés from the public Kaggle *UpdatedResumeDataSet* (962 rows;
+796 exact/normalised duplicates removed) ranked against six real employer job
+postings: Java Developer (Wipro), Python Developer (Capgemini), Web/Frontend
+Developer (Viyona Fintech), Data Scientist (NatWest), DevOps Engineer (Wipro),
+Software Tester (Vodafone/VOIS). Every job is ranked against the whole pool
+(996 job–résumé pairs). **Relevance labels are the job categories assigned by
+the dataset's curators; no additional human relevance judgments were collected.**
+
+Two label schemes are evaluated separately:
+
+| Job | strict | lenient |
+|---|---|---|
+| Java Developer | Java Developer | Java Developer |
+| Python Developer | Python Developer | Python Developer + Data Science |
+| Web / Frontend Developer | Web Designing | Web Designing |
+| Data Scientist | Data Science | Data Science |
+| DevOps Engineer | DevOps Engineer | DevOps Engineer |
+| Software Tester | Testing | Testing + Automation Testing |
+
+The résumé texts are not in this repository (third-party data). Rebuild them once:
+
+```bash
+cd backend
+python manage.py import_resume_csv --csv path/to/UpdatedResumeDataSet.csv --out evaluation_data/kaggle_tech
+```
+
+This writes `resumes/R0001.txt …` and is deterministic: the same CSV always gives
+the same ids as the committed `categories.csv` and `import_report.json`.
+Paste each job posting's text into `kaggle_tech/jd/<job>.txt` and fill the
+`accessed` dates in `dataset.json`; `evaluate` refuses to run without them.
+
+```bash
+python manage.py evaluate --dataset evaluation_data/kaggle_tech --similarity tfidf    # ~5 min, both schemes
+python manage.py evaluate --dataset evaluation_data/kaggle_tech --similarity gemini   # needs GEMINI_API_KEY
+```
+
+Outputs: `evaluation_results/kaggle_tech_<similarity>_strict/` and `…_lenient/`.
+Each report starts with the summary over the six jobs (mean AP/NDCG/AUC with
+bootstrap CIs, paired differences vs the keyword baseline and vs SS only),
+then per-job details. The stuffing and fairness tests use seeded samples of
+20 résumés per job (`experiments` in `dataset.json`) to bound API calls.
+
+The skill catalogue was extended with testing, Java EE, data-science, DevOps
+and web-design terms in a separate commit made before the benchmark existed,
+so the vocabulary is not tuned to benchmark results.
+
+### `frontend_12/` — controlled set (stuffing and fairness)
+
+12 constructed résumés (no real people), one job, labels by
 the authors. The job description was written after the labels; see
 `dataset.json` (`jd_note`). This pool is easy: every method separates it, so it
 cannot show ranking improvements on its own. Use it with the stuffing and

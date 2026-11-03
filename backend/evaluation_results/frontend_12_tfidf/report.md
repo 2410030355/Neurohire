@@ -4,14 +4,17 @@
 |---|---|
 | similarity (SS) | `tfidf` |
 | extraction | `regex (deterministic)` |
+| label scheme | `labels in dataset` |
 | reference date for "Present" | `2023-06-30` |
 | FS weights | `0.6 / 0.4` |
 | VS rule (main) | `first mention, 60-char window` |
 | k | `5` |
 | bootstrap replicates | `2000` |
 | seed | `42` |
-| code version | `146181b` |
-| run at | `2026-11-01 10:58 UTC` |
+| stuffing sample (non-relevant résumés per job) | `all` |
+| fairness sample (résumés per job) | `all` |
+| code version | `7a4a68c` |
+| run at | `2026-11-03 14:14 UTC` |
 
 12 constructed résumés (not real people) for one Frontend Developer role: 7 frontend (React/Vue) labelled relevant, 5 non-frontend (Java backend, Python data, PHP, Android, junior UI) labelled not relevant. Labels were assigned by the authors and are stored in each file's 'Ground Truth Label' line, which is removed before any scoring.
 
@@ -79,12 +82,12 @@ Ties are resolved by averaging over random tie-breaks (not input order).
 
 | VS rule | mean VS | AP | NDCG@5 | AUC |
 |---|---|---|---|---|
-| first-mention (paper) | 34.3 | 0.98 | 1.00 | 0.97 |
-| any-mention | 78.6 | 0.93 | 1.00 | 0.89 |
+| first-mention (paper) | 34.1 | 0.98 | 1.00 | 0.97 |
+| any-mention | 77.2 | 0.95 | 1.00 | 0.91 |
 
 ### 5. Keyword-stuffing robustness
 
-Each of the 5 non-relevant résumés was copied with the JD's skills (ci/cd, css, cypress, graphql, javascript, jest, react, redux, responsive design, rest api, typescript, vue) appended to its skills list and no supporting experience. Copies are labelled not relevant and added to the pool.
+5 of the 5 non-relevant résumés were copied with the JD's skills (ci/cd, css, cypress, graphql, javascript, jest, react, redux, responsive design, rest api, typescript, vue) appended to its skills list and no supporting experience. Copies are labelled not relevant and added to the pool.
 
 | Method | AP | NDCG@5 | P@5 | AUC | stuffed in top 5 | mean rank gain | mean score gain % |
 |---|---|---|---|---|---|---|---|
@@ -95,8 +98,8 @@ Each of the 5 non-relevant résumés was copied with the JD's skills (ci/cd, css
 | TF-IDF (pairwise) only | 0.95 | 1.00 | 1.00 | 0.96 | 0 | 5.6 | 132.3 |
 | NeuroHire: SS only | 0.95 | 1.00 | 1.00 | 0.96 | 0 | 5.6 | 132.3 |
 | NeuroHire: SS+CS | 0.95 | 1.00 | 1.00 | 0.94 | 0 | 3.4 | 4.6 |
-| NeuroHire: SS+CS+VS | 1.00 | 1.00 | 1.00 | 1.00 | 0 | 3.0 | 10.9 |
-| NeuroHire: full (SS+CS+VS+LV) | 0.94 | 1.00 | 1.00 | 0.94 | 0 | 2.6 | 15.0 |
+| NeuroHire: SS+CS+VS | 1.00 | 1.00 | 1.00 | 1.00 | 0 | 3.4 | 11.1 |
+| NeuroHire: full (SS+CS+VS+LV) | 0.94 | 1.00 | 1.00 | 0.94 | 0 | 2.6 | 15.2 |
 | NeuroHire-E: SS+VS_JD | 1.00 | 1.00 | 1.00 | 1.00 | 0 | 3.8 | 71.3 |
 | NeuroHire-E: full, JD-conditioned evidence | 0.95 | 1.00 | 1.00 | 0.96 | 0 | 2.8 | 18.6 |
 
@@ -118,7 +121,7 @@ Stuffed pool, 95% CIs and paired difference vs *NeuroHire: SS only* (does eviden
 
 ### 6. Counterfactual fairness (name swaps)
 
-Each résumé re-scored with 8 substituted identities (gender × community); other candidates unchanged.
+12 résumés each re-scored with 8 substituted identities (gender × community); other candidates unchanged.
 
 | Similarity input | mean |ΔFS| | max |ΔFS| | max |Δrank| | swaps changing rank | female − male mean FS |
 |---|---|---|---|---|---|
@@ -141,8 +144,8 @@ Leaving the "Ground Truth Label" line in the text changes SS by 1.75 points on a
 | Candidate_01_Arjun_Sharma | 1 | 6 | 36.2 | 27.0 | 100 | 50.0 | 0.0 | 50.0 | 41.7 | 6 | 35.1 | 3.9 | 4.0 | 12 |
 | Candidate_07_Arun_Balasubramanian | 0 | 7 | 32.5 | 13.1 | 100 | 0.0 | 85.2 | 61.7 | 16.7 | 7 | 34.8 | 2.9 | 3.0 | 8 |
 | Candidate_03_Rahul_Mehta | 1 | 8 | 27.9 | 22.8 | 100 | 0.0 | 6.7 | 35.6 | 25.0 | 8 | 31.2 | 2.9 | 3.0 | 9 |
-| Candidate_02_Priya_Venkataraman | 0 | 9 | 25.6 | 8.8 | 100 | 10.0 | 42.6 | 50.9 | 8.3 | 9 | 25.4 | 4.9 | 5.0 | 10 |
-| Candidate_11_Manoj_Kumar | 0 | 10 | 23.7 | 6.1 | 100 | 0.0 | — | 50.0 | 8.3 | 10 | 25.3 | — | 1.0 | 5 |
+| Candidate_02_Priya_Venkataraman | 0 | 9 | 25.4 | 8.8 | 100 | 8.3 | 42.6 | 50.3 | 8.3 | 9 | 25.4 | 4.9 | 5.0 | 12 |
+| Candidate_11_Manoj_Kumar | 0 | 10 | 23.7 | 6.1 | 100 | 0.0 | — | 50.0 | 8.3 | 10 | 25.3 | — | 1.0 | 6 |
 | Candidate_05_Karthik_Reddy | 0 | 11 | 21.3 | 6.5 | 100 | 11.1 | 19.2 | 43.4 | 8.3 | 11 | 20.9 | 5.9 | 6.0 | 9 |
 | Candidate_09_Suresh_Babu | 0 | 12 | 18.9 | 5.5 | 100 | 16.7 | 0.0 | 38.9 | 8.3 | 12 | 17.8 | 3.9 | 4.0 | 6 |
 

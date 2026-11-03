@@ -1,0 +1,22 @@
+Vodafone Intelligent Solutions (VOIS)
+Job title: Software Tester (Manual & Automation)
+Location: Pune, India
+Experience: 2–4 years
+Education: B.Tech degree.
+
+Job description summary:
+
+The role involves executing system integration testing for software releases, validating end-to-end application journeys and performing progression and regression testing. The tester is responsible for identifying defects, preparing test evidence and collaborating with development and project teams.
+
+Key responsibilities:
+- Execute system integration testing.
+- Perform end-to-end application testing.
+- Conduct progression and regression testing.
+- Prepare and maintain test evidence.
+- Identify, document and manage software defects.
+- Perform issue replication and support root-cause analysis.
+- Collaborate with development and business teams.
+- Support manual mobile testing and automation testing activities.
+Required skills: Software Testing, Manual Testing, System Integration Testing (SIT), Regression Testing, Progression Testing, Defect Management, Test Evidence, ADO and Mobile Testing.
+
+Additional skills: Test Automation, Automated Test Execution, CTDA and automated test-data utilisation.

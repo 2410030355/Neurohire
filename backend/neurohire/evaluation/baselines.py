@@ -107,9 +107,11 @@ def gemini_batch(texts: List[str], jd: str, caches=None, retries: int = None, sl
 SIMILARITY_BACKENDS: Dict[str, Callable] = {'tfidf': tfidf_pair_batch, 'gemini': gemini_batch}
 
 
-def baseline_scorers(similarity: str) -> Dict[str, Callable[[List[str], str], List[float]]]:
-    """Name → scorer. 'Embedding only' = the chosen similarity back-end alone."""
-    backend = SIMILARITY_BACKENDS[similarity]
+def baseline_scorers(similarity: str, backend: Optional[Callable] = None
+                     ) -> Dict[str, Callable[[List[str], str], List[float]]]:
+    """Name → scorer. 'Embedding only' = the chosen similarity back-end alone
+    (pass the run's cached back-end so its texts are not embedded twice)."""
+    backend = backend or SIMILARITY_BACKENDS[similarity]
 
     def embedding_only(texts, jd):
         return [s if s is not None else 0.0 for s in backend(texts, jd)['scores']]
