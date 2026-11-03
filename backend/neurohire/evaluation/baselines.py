@@ -77,35 +77,32 @@ def tfidf_pair_batch(texts: List[str], jd: str, caches=None) -> Dict:
             'cosines': cos, 'method': 'tfidf', 'new_embeddings': [None] * len(texts)}
 
 
-GEMINI_RETRIES = 5          # attempts per batch (rate limits on free keys)
-GEMINI_BACKOFF_SECONDS = 4  # doubled after every failed attempt
+GEMINI_RETRIES = None   # attempts per request; None = embeddings.MAX_RETRIES (GEMINI_EMBED_MAX_RETRIES)
 
 
 def gemini_batch(texts: List[str], jd: str, caches=None, retries: int = None, sleep=None) -> Dict:
     """
-    Gemini embeddings via the app's get_similarity_batch. Retries with
-    exponential back-off (rate limits), and raises instead of silently falling
-    back to TF-IDF — a Gemini run must be Gemini for every candidate.
+    Gemini embeddings via the app's get_similarity_batch in strict mode:
+    quota-paced, token-bounded requests sent one after another; an HTTP 429 is
+    retried after the server's delay, and only the failed request is re-sent.
+    Raises (never falls back to TF-IDF) — a Gemini run must be Gemini for
+    every candidate. Successful vectors are kept in the embedding cache, so a
+    re-run continues where a failed one stopped.
     """
-    import time
     from neurohire.analysis_engine import get_similarity_batch
-    retries = GEMINI_RETRIES if retries is None else retries
-    sleep = sleep or time.sleep
-    wait = GEMINI_BACKOFF_SECONDS
-    for attempt in range(1, retries + 1):
-        out = get_similarity_batch(texts, jd, caches)
-        if out['method'] == 'gemini':
-            return out
-        if attempt < retries:
-            print(f'  Gemini call failed (attempt {attempt}/{retries}); retrying in {wait}s …', flush=True)
-            sleep(wait)
-            wait *= 2
-    raise RuntimeError('Gemini embeddings unavailable after retries (check GEMINI_API_KEY, quota, network). '
-                       'Nothing was written. Run with --similarity tfidf or fix the key.')
+    from neurohire.embeddings import EmbeddingError
+    try:
+        out = get_similarity_batch(texts, jd, caches, strict=True,
+                                   retries=GEMINI_RETRIES if retries is None else retries, sleep=sleep)
+    except EmbeddingError as e:
+        raise RuntimeError(f'Gemini embeddings unavailable: {e} Nothing was written; vectors obtained so far '
+                           'are cached, so re-running continues from there.') from e
+    if out['method'] != 'gemini':
+        raise RuntimeError(f"Gemini run produced method={out['method']!r}; refusing to label it Gemini.")
+    return out
 
 
 SIMILARITY_BACKENDS: Dict[str, Callable] = {'tfidf': tfidf_pair_batch, 'gemini': gemini_batch}
-
 
 def baseline_scorers(similarity: str, backend: Optional[Callable] = None
                      ) -> Dict[str, Callable[[List[str], str], List[float]]]:

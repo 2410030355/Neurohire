@@ -115,6 +115,43 @@ bootstrap CIs, paired differences vs the keyword baseline and vs SS only),
 then per-job details. The stuffing and fairness tests use seeded samples of
 20 résumés per job (`experiments` in `dataset.json`) to bound API calls.
 
+### Running the Gemini evaluation on a free-tier key
+
+The free tier of `gemini-embedding-001` allows about **30,000 input tokens and 100
+requests per minute**. The evaluation paces itself to stay under that limit:
+
+* **Pacing.** Requests are packed to at most ~12,750 estimated tokens each, sent one at
+  a time, and held back until they fit in a sliding 60-second window. By default it
+  uses 85 % of the quota, and the token estimate is deliberately pessimistic
+  (characters ÷ 3).
+* **HTTP 429.** The run waits the delay the server asks for (`retryDelay`) and re-sends
+  only the request that failed. After each 429 it lowers its own pace by 15 %. If the
+  error is about the *daily* quota, it stops at once with a clear message.
+* **Cache.** Every vector it gets back is saved to
+  `evaluation_results/.cache/gemini_embeddings.sqlite` (git-ignored). Résumés are
+  embedded once and reused across all six jobs and both label mappings, and a run that
+  stops part-way picks up where it left off.
+* **No fallback.** A Gemini run is Gemini for every candidate. If embeddings can't be
+  obtained, it stops, writes no report and keeps the cache.
+
+```bash
+python manage.py evaluate --dataset evaluation_data/kaggle_tech --similarity gemini --scheme strict
+python manage.py evaluate --dataset evaluation_data/kaggle_tech --similarity gemini --scheme lenient
+```
+
+What to expect: the first run embeds 620 unique texts in about 49 requests (roughly
+370k tokens) and takes about **20–25 minutes**, mostly waiting on the quota, which is
+normal. The second run reuses the cache and makes almost no API calls. Lines starting
+with `[gemini]` report waits and retries. At the end a summary line lists requests,
+cache hits, retries and total waiting time.
+
+Settings (environment variables): `GEMINI_EMBED_TPM` (30000), `GEMINI_EMBED_RPM` (100),
+`GEMINI_EMBED_SAFETY` (0.85), `GEMINI_CHARS_PER_TOKEN` (3), `GEMINI_EMBED_MAX_RETRIES` (8),
+`GEMINI_EMBED_MAX_REQUEST_TOKENS`. Raise the first two if your key has a paid quota.
+In the web app the same pacing applies, but a request waits at most
+`GEMINI_APP_MAX_WAIT` seconds (20) before falling back to TF-IDF. That result is
+labelled `tfidf`, never `gemini`.
+
 ### Processing time and robustness
 
 ```bash

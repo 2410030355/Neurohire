@@ -42,6 +42,8 @@ class Command(BaseCommand):
         parser.add_argument('--seed', type=int, default=42)
         parser.add_argument('--gemini-extraction', action='store_true',
                             help='use Gemini for field extraction too (default: deterministic regex)')
+        parser.add_argument('--embedding-cache', default=os.path.join('evaluation_results', '.cache', 'gemini_embeddings.sqlite'),
+                            help='SQLite file for Gemini vectors (reused across runs; "" to disable)')
 
     def handle(self, *args, **o):
         import logging
@@ -60,6 +62,20 @@ class Command(BaseCommand):
             datasets = [load_dataset(o['dataset'], s) for s in schemes]   # validate everything first
         except ValueError as e:
             raise CommandError(str(e))
+        if o['similarity'] == 'gemini':
+            from neurohire import embeddings as E
+            cache = E.set_disk_cache(o['embedding_cache'] or None)
+            log = logging.getLogger('neurohire.embeddings')
+            log.setLevel(logging.INFO)
+            if not any(getattr(h, '_nh_eval', False) for h in log.handlers):
+                h = logging.StreamHandler(self.stdout._out)
+                h.setFormatter(logging.Formatter('  [gemini] %(message)s'))
+                h._nh_eval = True
+                log.addHandler(h)
+                log.propagate = False
+            self.stdout.write(E.describe_limits())
+            if cache is not None:
+                self.stdout.write(f'Embedding cache: {cache.path} ({len(cache)} vectors already stored)')
         try:
             commit = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'],
                                              stderr=subprocess.DEVNULL).decode().strip()
@@ -75,10 +91,16 @@ class Command(BaseCommand):
                 out = os.path.join('evaluation_results', f"{ds.name}_{o['similarity']}{suffix}")
             self.stdout.write(f"== {ds.name} · {o['similarity']}" + (f' · scheme {scheme}' if scheme else ''))
 
-            jobs = [evaluate_job(ds, job, o['similarity'], o['k'], o['n_boot'], o['seed'],
-                                 o['gemini_extraction'], progress=self.stdout.write,
-                                 stuffing_sample=exp.get('stuffing_sample'),
-                                 fairness_sample=exp.get('fairness_sample')) for job in ds.jobs]
+            try:
+                jobs = [evaluate_job(ds, job, o['similarity'], o['k'], o['n_boot'], o['seed'],
+                                     o['gemini_extraction'], progress=self.stdout.write,
+                                     stuffing_sample=exp.get('stuffing_sample'),
+                                     fairness_sample=exp.get('fairness_sample')) for job in ds.jobs]
+            except RuntimeError as e:
+                if o['similarity'] != 'gemini':
+                    raise
+                self._gemini_summary()
+                raise CommandError(str(e))
 
             k = o['k']
             macro = {m: {x: float(np.mean([j['main'][m][x] for j in jobs])) for x in ('AP', f'NDCG@{k}', f'P@{k}', 'AUC')}
@@ -96,7 +118,8 @@ class Command(BaseCommand):
                     'label scheme': scheme or 'labels in dataset',
                     'reference date for "Present"': str(ds.reference_date or 'today'),
                     'FS weights': f'{scoring.W_SS} / {scoring.W_AS}',
-                    'VS rule (main)': 'first mention, 60-char window',
+                    'VS rule (main)': "JD-conditioned: share of the JD's skills with an action verb in the same sentence",
+                    'VS rule (Original formulation rows)': 'all résumé skills, first mention, 60-char window',
                     'k': k, 'bootstrap replicates': o['n_boot'], 'seed': o['seed'],
                     'stuffing sample (non-relevant résumés per job)': exp.get('stuffing_sample') or 'all',
                     'fairness sample (résumés per job)': exp.get('fairness_sample') or 'all',
@@ -109,3 +132,12 @@ class Command(BaseCommand):
                 results['macro_stuffing_bootstrap'] = _macro([j['stuffing'] for j in jobs], '_draws', k)
             for p in write_outputs(_strip_private(results), out, k):
                 self.stdout.write(self.style.SUCCESS(f'wrote {p}'))
+        if o['similarity'] == 'gemini':
+            self._gemini_summary()
+
+    def _gemini_summary(self):
+        from neurohire import embeddings as E
+        st = E.STATS.as_dict()
+        self.stdout.write(f"Gemini usage: {st['requests']} requests, {st['texts_sent']} texts embedded "
+                          f"(~{st['est_tokens_sent']:,} est. tokens), {st['cache_hits']} cache hits, "
+                          f"{st['retries']} retries, {st['waited_s']:.0f}s waiting on quota.")
