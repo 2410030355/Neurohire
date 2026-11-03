@@ -80,32 +80,37 @@ def get_current_weights() -> Dict[str, float]:
 GEMINI_EMBEDDING_TASK_TYPE = os.environ.get('GEMINI_EMBEDDING_TASK_TYPE', 'SEMANTIC_SIMILARITY').strip()
 
 
+# How long a web request may wait on the Gemini quota before using TF-IDF instead.
+APP_MAX_QUOTA_WAIT = float(os.environ.get('GEMINI_APP_MAX_WAIT', '20') or 20)
+APP_MAX_RETRIES = 3
+
+
+def gemini_embed(texts: List[str], strict: bool = False, max_retries: Optional[int] = None,
+                 sleep=None) -> List[np.ndarray]:
+    """
+    Embed texts through the quota-aware layer (neurohire.embeddings): token-
+    bounded batches, sliding-window rate limit, server retry delays, cache.
+    strict=False (app): bounded waiting, few retries. strict=True (evaluation):
+    waits as long as the quota requires. Raises embeddings.EmbeddingError.
+    """
+    from . import embeddings as E
+    return E.embed_texts(
+        list(texts), client=_get_gemini_client(), model=GEMINI_EMBEDDING_MODEL,
+        task_type=GEMINI_EMBEDDING_TASK_TYPE, key_fn=embedding_cache_key, cache=E.disk_cache(),
+        max_items=EMBED_BATCH_SIZE,
+        max_retries=max_retries if max_retries is not None else (None if strict else APP_MAX_RETRIES),
+        max_total_wait=None if strict else APP_MAX_QUOTA_WAIT, sleep=sleep or time.sleep)
+
+
 def _get_gemini_embeddings(texts: List[str]) -> Optional[List[np.ndarray]]:
-    """
-    Embed several texts in ONE Gemini API call (résumé + job description
-    together: half the requests and latency of one call per text).
-    Returns None on any failure — caller falls back to TF-IDF. Never raises.
-    """
-    client = _get_gemini_client()
-    if client is None or not texts:
+    """App helper: vectors, or None on any failure (caller falls back to TF-IDF)."""
+    from .embeddings import EmbeddingError
+    if not texts or _get_gemini_client() is None:
         return None
     try:
-        kwargs = {'model': GEMINI_EMBEDDING_MODEL, 'contents': list(texts)}
-        if GEMINI_EMBEDDING_TASK_TYPE:
-            kwargs['config'] = {'task_type': GEMINI_EMBEDDING_TASK_TYPE}
-        response = client.models.embed_content(**kwargs)
-        embeddings = getattr(response, 'embeddings', None)
-        if not embeddings or len(embeddings) != len(texts):
-            return None
-        vectors = []
-        for emb in embeddings:
-            values = getattr(emb, 'values', None)
-            if not values:
-                return None
-            vectors.append(np.asarray(values, dtype=float))
-        return vectors
-    except Exception as e:
-        logger.error(f"Gemini embedding request failed: {e}")
+        return gemini_embed(texts)
+    except EmbeddingError as e:
+        logger.warning(f"Gemini embeddings unavailable: {e}")
         return None
 
 
@@ -178,7 +183,8 @@ def embedding_cache_key(text: str) -> str:
 
 
 def get_similarity_batch(resume_texts: List[str], job_description_text: str,
-                         caches: Optional[List[Optional[dict]]] = None) -> Dict:
+                         caches: Optional[List[Optional[dict]]] = None, strict: bool = False,
+                         retries: Optional[int] = None, sleep=None) -> Dict:
     """
     SS for many résumés against one JD (ranking). One representation for the
     whole set — if any Gemini call fails, every candidate falls back to TF-IDF
@@ -186,6 +192,8 @@ def get_similarity_batch(resume_texts: List[str], job_description_text: str,
 
     caches: optional per-résumé {'key': ..., 'values': [...]} from MongoDB;
     reused when the key matches, so stored candidates are embedded only once.
+    strict: True for evaluation runs — raise EmbeddingError instead of
+    falling back to TF-IDF (a Gemini run must be Gemini for every candidate).
     Returns {'scores', 'cosines', 'method', 'new_embeddings'} where
     new_embeddings[i] is a cache dict to store (or None if nothing new).
     """
@@ -206,19 +214,22 @@ def get_similarity_batch(resume_texts: List[str], job_description_text: str,
     todo = [i for i in range(n) if vectors[i] is None and texts[i]]
     jd_vec, ok = None, _get_gemini_client() is not None
     if ok:
-        batch_texts = [jd] + [texts[i] for i in todo]
-        got: List[np.ndarray] = []
-        for start in range(0, len(batch_texts), EMBED_BATCH_SIZE):
-            chunk = _get_gemini_embeddings(batch_texts[start:start + EMBED_BATCH_SIZE])
-            if chunk is None:
-                ok = False
-                break
-            got.extend(chunk)
-        if ok:
+        from .embeddings import EmbeddingError
+        try:
+            got = gemini_embed([jd] + [texts[i] for i in todo], strict=strict, max_retries=retries, sleep=sleep)
             jd_vec = got[0]
             for i, vec in zip(todo, got[1:]):
                 vectors[i] = vec
+        except EmbeddingError as e:
+            if strict:
+                raise
+            logger.warning(f"Gemini embeddings failed for ranking: {e}")
+            ok = False
+    elif strict:
+        from .embeddings import EmbeddingError
+        raise EmbeddingError('Gemini client is not configured (GEMINI_API_KEY missing).')
 
+    todo_set = set(todo)
     if ok and jd_vec is not None:
         scores, cosines, new = [], [], []
         for i in range(n):
@@ -227,7 +238,7 @@ def get_similarity_batch(resume_texts: List[str], job_description_text: str,
                 continue
             cos = float(cosine_similarity([vectors[i]], [jd_vec])[0][0])
             scores.append(similarity_to_score(cos)); cosines.append(round(cos, 6))
-            new.append({'key': keys[i], 'values': [float(x) for x in vectors[i]]} if i in todo else None)
+            new.append({'key': keys[i], 'values': [float(x) for x in vectors[i]]} if i in todo_set else None)
         return {'scores': scores, 'cosines': cosines, 'method': 'gemini', 'new_embeddings': new}
 
     logger.info("Gemini embeddings unavailable for ranking — TF-IDF fallback for every candidate.")

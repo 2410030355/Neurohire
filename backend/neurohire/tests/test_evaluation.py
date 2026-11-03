@@ -179,6 +179,12 @@ class PerturbTests(SimpleTestCase):
 class GeminiPathTests(DatasetMixin, SimpleTestCase):
     """The --similarity gemini path, with a simulated client (no network)."""
 
+    def setUp(self):
+        super().setUp()
+        from neurohire import embeddings as E
+        E.reset_shared_limiter()
+        self.addCleanup(E.reset_shared_limiter)
+
     def _fake_client(self, fail_first=0):
         import hashlib
         from unittest.mock import MagicMock

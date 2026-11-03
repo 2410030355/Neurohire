@@ -45,3 +45,6 @@ backend/uploads/
 
 # Third-party résumé texts are rebuilt locally with `manage.py import_resume_csv`
 backend/evaluation_data/kaggle_tech/resumes/
+
+# Gemini embedding cache (evaluate --similarity gemini)
+backend/evaluation_results/.cache/
