@@ -1,0 +1,107 @@
+{
+  "name": "Education Details",
+  "email": null,
+  "phone": null,
+  "skills": [
+    "aws",
+    "git",
+    "keras",
+    "machine learning",
+    "python",
+    "scikit-learn",
+    "scipy"
+  ],
+  "other_skills": [],
+  "jd_skills": [
+    "angular",
+    "ci/cd",
+    "java",
+    "postgresql",
+    "rest api",
+    "spring boot",
+    "sql",
+    "tdd",
+    "typescript",
+    "uat",
+    "unit testing"
+  ],
+  "missing_skills": [
+    "angular",
+    "ci/cd",
+    "java",
+    "postgresql",
+    "rest api",
+    "spring boot",
+    "sql",
+    "tdd",
+    "typescript",
+    "uat",
+    "unit testing"
+  ],
+  "experience_years": null,
+  "experience_years_dated": null,
+  "experience_years_claimed": null,
+  "experience_source": "none",
+  "employment_history": [],
+  "projects": [],
+  "education": "Bachelor's Degree",
+  "consistency_score": 100.0,
+  "consistency_flags": [],
+  "consistency_rules_skipped": [
+    "senior_skills_low_experience",
+    "skill_count_vs_experience"
+  ],
+  "skill_validation_score": 0.0,
+  "skill_validation_score_jd": 0.0,
+  "skill_validation_score_original": 14.29,
+  "jd_skills_evidenced": [],
+  "validated_skills": [
+    {
+      "skill": "aws",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "git",
+      "status": "Valid",
+      "mentions": 1,
+      "evidence": "ter and Prophet. Worked on meta-feature extracting problem. github.com/rathorology Implemented a state of the art research pap"
+    },
+    {
+      "skill": "keras",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "machine learning",
+      "status": "Partial",
+      "mentions": 3,
+      "evidence": null
+    },
+    {
+      "skill": "python",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "scikit-learn",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    },
+    {
+      "skill": "scipy",
+      "status": "Unverified",
+      "mentions": 1,
+      "evidence": null
+    }
+  ],
+  "lv_raw": null,
+  "lv_new_skills": [],
+  "lv_span_years": null,
+  "lv_basis": "insufficient dated history",
+  "extraction_method": "regex"
+}

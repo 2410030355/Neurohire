@@ -347,3 +347,20 @@ class FastSkillExtractionTests(SimpleTestCase):
         a = extract_skills('React, Redux, Jest')
         a.append('mutated')
         self.assertNotIn('mutated', extract_skills('React, Redux, Jest'))
+
+
+class PerformanceReportCommandTests(SimpleTestCase):
+    def test_runs_on_frontend_12_and_handles_failures(self):
+        import json, os, tempfile
+        from django.core.management import call_command
+        root = os.path.join(os.path.dirname(__file__), '..', '..', 'evaluation_data', 'frontend_12')
+        with tempfile.TemporaryDirectory() as out:
+            call_command('performance_report', dataset=root, out=out, examples=1, stdout=open(os.devnull, 'w'))
+            res = json.load(open(os.path.join(out, 'performance.json')))
+            self.assertEqual(res['extraction']['n'], 12)
+            self.assertTrue(os.path.exists(os.path.join(out, 'examples', res['examples'][0] + '_extracted.json')))
+            outcomes = {c['case']: c for c in res['robustness']}
+            self.assertTrue(outcomes['Empty résumé']['outcome'].startswith('rejected'))
+            self.assertFalse(any(c['outcome'].startswith('ERROR') for c in res['robustness']))
+            self.assertEqual(outcomes['Gemini embedding API failure']['similarity_method'], 'tfidf')
+            self.assertEqual(outcomes['Gemini extraction API failure']['extraction_method'], 'regex')

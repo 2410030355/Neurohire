@@ -291,7 +291,8 @@ class UploadStorageTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         c = Client()
         c.force_login(self.rec)
-        resp = c.post('/api/upload-resume/', {'resume': SimpleUploadedFile('cv.pdf', b'%PDF')}, HTTP_ORIGIN=TRUSTED)
+        resp = c.post('/api/upload-resume/', {'resume': SimpleUploadedFile('cv.pdf', b'%PDF'), 'target_role': 'Dev'},
+                      HTTP_ORIGIN=TRUSTED)
         self.assertEqual(resp.status_code, 201, resp.content)
         stored = ins.call_args[0][0]
         self.assertEqual(stored['resume_text_redacted'], 'react developer')

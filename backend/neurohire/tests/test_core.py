@@ -655,6 +655,17 @@ class UploadAndQuotaEndpointTests(TestCase):
         an.assert_not_called()
 
     @patch('neurohire.views.analyze_resume')
+    def test_recruiter_upload_needs_role_or_jd(self, an):
+        self.client.force_login(self.recruiter)
+        with patch('neurohire.access.is_allowed_recruiter_email', return_value=True), \
+                patch('neurohire.views.is_allowed_recruiter_email', return_value=True, create=True):
+            resp = self.client.post('/api/upload-resume/', {'resume': SimpleUploadedFile('cv.pdf', b'%PDF-1.4 x'),
+                                                            'target_role': '  '}, HTTP_ORIGIN=TRUSTED_ORIGIN)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('target role', resp.json()['error'])
+        an.assert_not_called()
+
+    @patch('neurohire.views.analyze_resume')
     def test_seeker_upload_requires_login(self, an):
         self.assertEqual(self._upload('/api/seeker-resume/', 'cv.pdf', b'%PDF').status_code, 403)
         an.assert_not_called()

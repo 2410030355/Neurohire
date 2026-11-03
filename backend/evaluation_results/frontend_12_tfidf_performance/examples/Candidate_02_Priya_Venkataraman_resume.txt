@@ -1,0 +1,19 @@
+Priya Venkataraman
+priya.v@outlook.com  |  +91 87654 32109  |  Chennai, Tamil Nadu
+PROFESSIONAL SUMMARY
+5 years of experience in Java Spring Boot microservices and MySQL database design. Expertise in REST API development and system architecture.
+SKILLS
+Java  •  Spring Boot  •  MySQL  •  Hibernate  •  Docker  •  Maven  •  JUnit  •  Kafka
+WORK EXPERIENCE
+Senior Backend Engineer  —  TCS  (2020 – Present)
+• Designed and built 12 microservices using Spring Boot and deployed on Kubernetes
+• Optimized MySQL queries reducing response time by 35%
+• Implemented Kafka-based event streaming for order processing pipeline
+Java Developer  —  Wipro  (2018 – 2020)
+• Developed REST APIs using Spring MVC and Hibernate ORM
+• Wrote unit tests with JUnit and Mockito achieving 85% code coverage
+PROJECTS
+Order Management System: Built with Spring Boot, MySQL, and Kafka. Handles 50K+ daily orders.
+Employee Payroll API: RESTful API with JWT authentication and role-based access control.
+EDUCATION
+B.E. Information Technology — Anna University, 2018

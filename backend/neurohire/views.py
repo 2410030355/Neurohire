@@ -376,6 +376,12 @@ class ResumeUploadView(APIView):
         if upload_error:
             return Response({"error": upload_error}, status=status.HTTP_400_BAD_REQUEST)
 
+        if not (str(target_role).strip() or str(job_description).strip()):
+            # Without a role or JD there is nothing to match against (SS undefined),
+            # so FS would rest on AS alone and look like a strong fit.
+            return Response({"error": "Enter a target role or a job description."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         file_path = _safe_upload_path(file.name)
 
         try:

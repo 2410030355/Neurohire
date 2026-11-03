@@ -88,6 +88,20 @@ bootstrap CIs, paired differences vs the keyword baseline and vs SS only),
 then per-job details. The stuffing and fairness tests use seeded samples of
 20 résumés per job (`experiments` in `dataset.json`) to bound API calls.
 
+### Processing time and robustness
+
+```bash
+python manage.py performance_report --dataset evaluation_data/kaggle_tech --similarity tfidf
+python manage.py performance_report --dataset evaluation_data/kaggle_tech --similarity gemini --gemini-extraction
+```
+
+Writes `evaluation_results/kaggle_tech_<similarity>_performance/performance.md`:
+time per stage (extraction + CS/VS/LV per résumé, similarity/embedding per job,
+ranking per job), robustness cases (empty résumé, missing fields, no job
+description, simulated Gemini embedding and extraction failures), and
+`examples/<id>_resume.txt` + `<id>_extracted.json` (input résumé and the JSON
+the app extracts). Timings depend on the machine; report it with the numbers.
+
 The skill catalogue was extended with testing, Java EE, data-science, DevOps
 and web-design terms in a separate commit made before the benchmark existed,
 so the vocabulary is not tuned to benchmark results.
