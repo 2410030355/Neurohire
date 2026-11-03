@@ -1,0 +1,52 @@
+{
+  "name": "kaggle_tech",
+  "description": "Multi-role benchmark: 166 unique résumés (962 rows with 796 exact/normalised duplicates removed) from the public Kaggle 'UpdatedResumeDataSet' (25 curator-assigned job categories), ranked against six real employer job postings. Relevance labels are the job categories assigned by the dataset's curators; no additional human relevance judgments were collected. Every job is ranked against the full pool of 166 résumés (996 job-résumé pairs per label scheme).",
+  "source": {
+    "dataset": "UpdatedResumeDataSet.csv (Kaggle)",
+    "note": "Cite the Kaggle dataset page in the paper; check its licence before redistributing the résumé texts."
+  },
+  "categories_file": "categories.csv",
+  "resume_dir": "resumes",
+  "label_schemes": ["strict", "lenient"],
+  "experiments": {"stuffing_sample": 20, "fairness_sample": 20},
+  "jobs": [
+    {
+      "id": "java", "title": "Java Developer", "jd_file": "jd/java.txt",
+      "source": {"employer": "Wipro", "posting_title": "Java Fullstack Developer",
+                 "url": "https://careers.wipro.com/job/Java-Fullstack-Developer/195135-en_US/", "accessed": ""},
+      "jd_note": "Full-stack posting (also lists frontend skills).",
+      "relevant_categories": {"strict": ["Java Developer"], "lenient": ["Java Developer"]}
+    },
+    {
+      "id": "python", "title": "Python Developer", "jd_file": "jd/python.txt",
+      "source": {"employer": "Capgemini", "posting_title": "Python Developer",
+                 "url": "https://careers.capgemini.com/job/Mumbai-%28ex-Bombay%29-Python-Developer-C1/1453243733/", "accessed": ""},
+      "relevant_categories": {"strict": ["Python Developer"], "lenient": ["Python Developer", "Data Science"]}
+    },
+    {
+      "id": "frontend", "title": "Web / Frontend Developer", "jd_file": "jd/frontend.txt",
+      "source": {"employer": "Viyona Fintech", "posting_title": "Frontend Engineer (React)",
+                 "url": "https://viyonafintech.com/about/careers/job/frontend-engineer-react", "accessed": ""},
+      "jd_note": "The dataset's only web category is 'Web Designing', which is design-leaning.",
+      "relevant_categories": {"strict": ["Web Designing"], "lenient": ["Web Designing"]}
+    },
+    {
+      "id": "datascience", "title": "Data Scientist", "jd_file": "jd/datascience.txt",
+      "source": {"employer": "NatWest", "posting_title": "Data Scientist",
+                 "url": "https://jobs.natwestgroup.com/jobs/18417731-data-scientist", "accessed": ""},
+      "relevant_categories": {"strict": ["Data Science"], "lenient": ["Data Science"]}
+    },
+    {
+      "id": "devops", "title": "DevOps Engineer", "jd_file": "jd/devops.txt",
+      "source": {"employer": "Wipro", "posting_title": "DEVOPS SRE",
+                 "url": "https://careers.wipro.com/job/DEVOPS-SRE/180406-en_US/", "accessed": ""},
+      "relevant_categories": {"strict": ["DevOps Engineer"], "lenient": ["DevOps Engineer"]}
+    },
+    {
+      "id": "tester", "title": "Software Tester", "jd_file": "jd/tester.txt",
+      "source": {"employer": "Vodafone (VOIS)", "posting_title": "Software Tester (Manual & Automation)",
+                 "url": "https://opportunities.vodafone.com/job/Pune-Software-Tester-%28Manual-%26-Automation%29-VOIS/1445471833/", "accessed": ""},
+      "relevant_categories": {"strict": ["Testing"], "lenient": ["Testing", "Automation Testing"]}
+    }
+  ]
+}

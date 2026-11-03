@@ -236,3 +236,114 @@ class GeminiPathTests(DatasetMixin, SimpleTestCase):
         from django.core.management.base import CommandError
         with self.assertRaises(CommandError):
             call_command('evaluate', dataset=self.dir, similarity='gemini', stdout=io.StringIO())
+
+
+class MultiRoleBenchmarkTests(SimpleTestCase):
+    """Category labels with strict / lenient schemes, CSV import, sampling, macro summary."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        rows = [('Java Developer', 'Built Spring Boot microservices in Java with Hibernate and Maven.'),
+                ('Java Developer', 'Built Spring Boot microservices in Java with Hibernate and Maven.'),  # duplicate
+                ('Java Developer', 'Developed REST APIs in Java, JUnit tests, Spring MVC, SQL.'),
+                ('Python Developer', 'Developed Django REST APIs in Python, pandas scripts, PostgreSQL.'),
+                ('Data Science', 'Built machine learning models in Python with scikit-learn and pandas.'),
+                ('Testing', 'Wrote test cases, manual testing, regression testing, JIRA defect tracking.'),
+                ('Automation Testing', 'Automated regression suites with Selenium and TestNG in Java.'),
+                ('HR', 'Managed recruitment drives, onboarding and payroll coordination for 200 staff.'),
+                ('Sales', 'Delivered quarterly sales targets and managed key client accounts in retail.')]
+        self.csv = os.path.join(self.dir, 'in.csv')
+        with open(self.csv, 'w', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            w.writerow(['Category', 'Resume'])
+            # one row with UTF-8 read as Latin-1 ("â€¢" for "•")
+            w.writerow(['Sales', 'Skills â€¢ negotiation â€¢ CRM. Managed accounts.'])
+            w.writerows(rows)
+        self.ds = os.path.join(self.dir, 'bench')
+        call_command('import_resume_csv', csv=self.csv, out=self.ds, stdout=io.StringIO())
+        os.makedirs(os.path.join(self.ds, 'jd'))
+        jds = {'python': 'Python Developer: Python, Django, REST APIs, PostgreSQL, pandas, unit testing and Git.',
+               'tester': 'Software Tester: manual testing, test cases, regression testing, Selenium, JIRA, SDLC.'}
+        for k, v in jds.items():
+            open(os.path.join(self.ds, 'jd', f'{k}.txt'), 'w', encoding='utf-8').write(v)
+        json.dump({'name': 'bench', 'categories_file': 'categories.csv', 'resume_dir': 'resumes',
+                   'label_schemes': ['strict', 'lenient'],
+                   'experiments': {'stuffing_sample': 2, 'fairness_sample': 2},
+                   'jobs': [
+                       {'id': 'python', 'title': 'Python Developer', 'jd_file': 'jd/python.txt',
+                        'source': {'employer': 'X', 'url': 'https://example.com/py'},
+                        'relevant_categories': {'strict': ['Python Developer'],
+                                                'lenient': ['Python Developer', 'Data Science']}},
+                       {'id': 'tester', 'title': 'Software Tester', 'jd_file': 'jd/tester.txt',
+                        'relevant_categories': {'strict': ['Testing'],
+                                                'lenient': ['Testing', 'Automation Testing']}}]},
+                  open(os.path.join(self.ds, 'dataset.json'), 'w'))
+
+    def test_import_dedupes_and_repairs_encoding(self):
+        rep = json.load(open(os.path.join(self.ds, 'import_report.json')))
+        self.assertEqual((rep['rows_read'], rep['unique_resumes'], rep['duplicates_removed']), (10, 9, 1))
+        texts = [open(os.path.join(self.ds, 'resumes', f), encoding='utf-8').read()
+                 for f in sorted(os.listdir(os.path.join(self.ds, 'resumes')))]
+        self.assertIn('Skills • negotiation • CRM', texts[0])
+        self.assertFalse(any('â' in t for t in texts))
+
+    def test_conflicting_duplicate_categories_are_refused(self):
+        bad = os.path.join(self.dir, 'bad.csv')
+        with open(bad, 'w', newline='', encoding='utf-8') as f:
+            csv.writer(f).writerows([['Category', 'Resume'], ['HR', 'Same text'], ['Sales', 'same  TEXT']])
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command('import_resume_csv', csv=bad, out=os.path.join(self.dir, 'b2'), stdout=io.StringIO())
+
+    def test_strict_and_lenient_labels(self):
+        strict, lenient = load_dataset(self.ds, 'strict'), load_dataset(self.ds, 'lenient')
+        self.assertEqual(sum(strict.jobs[0].labels.values()), 1)     # Python Developer only
+        self.assertEqual(sum(lenient.jobs[0].labels.values()), 2)    # + Data Science
+        self.assertEqual(sum(strict.jobs[1].labels.values()), 1)     # Testing
+        self.assertEqual(sum(lenient.jobs[1].labels.values()), 2)    # + Automation Testing
+        self.assertEqual(strict.jobs[0].source['employer'], 'X')
+
+    def test_missing_or_empty_jd_is_refused(self):
+        open(os.path.join(self.ds, 'jd', 'tester.txt'), 'w').write('')
+        with self.assertRaises(ValueError):
+            load_dataset(self.ds, 'strict')
+
+    def test_unknown_category_is_refused(self):
+        spec = json.load(open(os.path.join(self.ds, 'dataset.json')))
+        spec['jobs'][0]['relevant_categories']['strict'] = ['Pyhton Developer']
+        json.dump(spec, open(os.path.join(self.ds, 'dataset.json'), 'w'))
+        with self.assertRaises(ValueError):
+            load_dataset(self.ds, 'strict')
+
+    def test_evaluate_runs_both_schemes_with_macro_summary(self):
+        out = os.path.join(self.dir, 'out')
+        call_command('evaluate', dataset=self.ds, similarity='tfidf', out=out, k=2, n_boot=30, stdout=io.StringIO())
+        for scheme in ('strict', 'lenient'):
+            report = open(os.path.join(f'{out}_{scheme}', 'report.md'), encoding='utf-8').read()
+            self.assertIn(f'Label scheme **{scheme}**', report)
+            self.assertIn('Summary over 2 jobs', report)
+            self.assertLess(report.index('Summary over 2 jobs'), report.index('## Job:'))
+            results = json.load(open(os.path.join(f'{out}_{scheme}', 'results.json')))
+            self.assertIn('macro_bootstrap', results)
+            self.assertNotIn('_draws', json.dumps(results))
+            self.assertEqual(results['jobs'][0]['stuffing']['n_stuffed'], 2)
+            self.assertEqual(results['jobs'][0]['fairness']['redaction on']['candidates_tested'], 2)
+
+
+class FastSkillExtractionTests(SimpleTestCase):
+
+    def test_matches_reference_implementation(self):
+        from neurohire import extraction as ex
+        samples = ["Skills: Go, R, C, Python\nwent to go home", "Express\nnode.js\nExpress.js",
+                   "\x0cReact\x1cRedux Jest js", "js ts rest", "React js, TypeScript\n\n\nml models",
+                   "Tools: Excel, Tableau, Hive\nI excel at hive minds", "C/C++ and ANSI C",
+                   "Spring Boot, Spring, LESS, Less css, AI, artificial intelligence"]
+        for t in samples:
+            self.assertEqual(ex.extract_skills(t), ex._extract_skills_reference(t), t)
+
+    def test_cached_result_is_not_shared(self):
+        from neurohire.extraction import extract_skills
+        a = extract_skills('React, Redux, Jest')
+        a.append('mutated')
+        self.assertNotIn('mutated', extract_skills('React, Redux, Jest'))

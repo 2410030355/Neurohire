@@ -67,15 +67,29 @@ class MemoSimilarity:
                 'new_embeddings': [None] * len(texts)}
 
 
+_ANALYSES: Dict = {}
+
+
+def analyze_cached(text: str, job: Job, ref: Optional[date], vs_mode='first', redact=True,
+                   gemini_extraction=False) -> Dict:
+    """
+    analyze_text with SS skipped, cached per (text, options). Everything the
+    evaluation uses (skills, CS, VS, LV, redacted text) is independent of the
+    job description, so one analysis serves every job and label scheme.
+    (Only jd_skills / missing_skills depend on the JD; the evaluation does not use them.)
+    """
+    key = (hashlib.sha256(text.encode()).hexdigest(), vs_mode, redact, gemini_extraction, str(ref))
+    if key not in _ANALYSES:
+        _ANALYSES[key] = analyze_text(text, job.title, job.jd, reference_date=ref, redact=redact,
+                                      compute_similarity=False, use_gemini_extraction=gemini_extraction,
+                                      vs_mode=vs_mode)
+    return _ANALYSES[key]
+
+
 def analyze_pool(texts: Dict[str, str], job: Job, ref: Optional[date], vs_mode='first',
                  redact=True, gemini_extraction=False) -> Dict[str, Dict]:
-    out = {}
-    for rid, text in texts.items():
-        a = analyze_text(text, job.title, job.jd, reference_date=ref, redact=redact,
-                         compute_similarity=False, use_gemini_extraction=gemini_extraction,
-                         vs_mode=vs_mode)
-        out[rid] = a
-    return out
+    return {rid: analyze_cached(text, job, ref, vs_mode, redact, gemini_extraction)
+            for rid, text in texts.items()}
 
 
 def to_candidates(analyses: Dict[str, Dict]) -> List[Dict]:
@@ -98,7 +112,8 @@ def _vector(d: Dict[str, float], ids: List[str]) -> List[float]:
 
 
 def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n_boot: int = 2000,
-                 seed: int = 42, gemini_extraction: bool = False, progress=print) -> Dict:
+                 seed: int = 42, gemini_extraction: bool = False, progress=print,
+                 stuffing_sample: Optional[int] = None, fairness_sample: Optional[int] = None) -> Dict:
     ids = [r.id for r in ds.resumes]
     labels = [job.labels[i] for i in ids]
     texts = {r.id: r.text for r in ds.resumes}
@@ -114,7 +129,7 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
     # ── 1. main comparison ────────────────────────────────────────────────
     progress(f'[{job.id}] baselines and ablations')
     method_scores: Dict[str, List[float]] = {}
-    for name, fn in baseline_scorers(similarity).items():
+    for name, fn in baseline_scorers(similarity, sim).items():
         method_scores[name] = [float(x) for x in fn(redacted, job.jd)]
     nh_detail = {}
     for name, comps in ABLATIONS:
@@ -129,7 +144,9 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
     main = {m: M.evaluate_scores(s, labels, k=k, seed=seed) for m, s in method_scores.items()}
     progress(f'[{job.id}] bootstrap ({n_boot} replicates)')
     boot = M.stratified_bootstrap(method_scores, labels, k=k, n_boot=n_boot, seed=seed,
-                                  metrics=('AP', f'NDCG@{k}', f'P@{k}', 'AUC'), reference=REFERENCE)
+                                  metrics=('AP', f'NDCG@{k}', f'P@{k}', 'AUC'), reference=REFERENCE,
+                                  return_draws=True)
+    draws = boot.pop('_draws')
 
     # ── 2. weight sensitivity ─────────────────────────────────────────────
     weights = []
@@ -156,13 +173,14 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
     # ── 4. keyword stuffing ───────────────────────────────────────────────
     progress(f'[{job.id}] keyword-stuffing robustness')
     stuffing = stuffing_experiment(ids, labels, texts, pool, job, ref, sim, similarity, k, seed,
-                                   gemini_extraction, n_boot)
+                                   gemini_extraction, n_boot, stuffing_sample)
 
     # ── 5. counterfactual fairness ────────────────────────────────────────
     progress(f'[{job.id}] counterfactual fairness (redaction on / off)')
+    subjects = _sample(ids, fairness_sample, seed)
     fairness = {
-        'redaction on': fairness_experiment(ids, texts, pool, job, ref, sim, True, gemini_extraction),
-        'redaction off': fairness_experiment(ids, texts, None, job, ref, sim, False, gemini_extraction),
+        'redaction on': fairness_experiment(ids, texts, pool, job, ref, sim, True, gemini_extraction, subjects),
+        'redaction off': fairness_experiment(ids, texts, None, job, ref, sim, False, gemini_extraction, subjects),
     }
 
     # ── 6. label leakage ──────────────────────────────────────────────────
@@ -187,7 +205,9 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
 
     return {
         'job': {'id': job.id, 'title': job.title, 'jd': job.jd, 'jd_note': job.jd_note,
+                'source': job.source, 'scheme': job.scheme, 'relevant_categories': job.relevant_categories,
                 'n': len(ids), 'n_relevant': sum(1 for l in labels if l > 0)},
+        '_draws': draws,
         'main': main, 'bootstrap': boot, 'weights': weights,
         'evidence': evidence,
         'evidence_bootstrap': M.stratified_bootstrap(method_scores_any, labels, k=k, n_boot=n_boot, seed=seed,
@@ -198,10 +218,18 @@ def evaluate_job(ds: Dataset, job: Job, similarity: str = 'tfidf', k: int = 5, n
     }
 
 
+def _sample(items: List[str], n: Optional[int], seed: int) -> List[str]:
+    """Seeded sample (all items when n is None or larger than the list)."""
+    if not n or n >= len(items):
+        return list(items)
+    rng = np.random.default_rng(seed)
+    return sorted(rng.choice(items, n, replace=False).tolist())
+
+
 def stuffing_experiment(ids, labels, texts, pool, job, ref, sim, similarity, k, seed, gemini_extraction,
-                        n_boot=2000):
+                        n_boot=2000, sample=None):
     jd_skills = extract_skills(job.jd)
-    negatives = [i for i, l in zip(ids, labels) if l <= 0]
+    negatives = _sample([i for i, l in zip(ids, labels) if l <= 0], sample, seed)
     stuffed_texts = {f'{i}__stuffed': skill_stuff(texts[i], display_names(jd_skills)) for i in negatives}
     stuffed_pool = analyze_pool(stuffed_texts, job, ref, 'first', True, gemini_extraction)
     sim.prefetch([a['resume_text_redacted'] for a in stuffed_pool.values()], job.jd)
@@ -211,7 +239,8 @@ def stuffing_experiment(ids, labels, texts, pool, job, ref, sim, similarity, k, 
     aug_texts = [aug_pool[i]['resume_text_redacted'] for i in aug_ids]
     cands = to_candidates({i: aug_pool[i] for i in aug_ids})
 
-    scores = {name: [float(x) for x in fn(aug_texts, job.jd)] for name, fn in baseline_scorers(similarity).items()}
+    scores = {name: [float(x) for x in fn(aug_texts, job.jd)]
+              for name, fn in baseline_scorers(similarity, sim).items()}
     for name, comps in ABLATIONS:
         res = nh_scores(cands, job.jd, sim, comps)
         scores[name] = [res[i]['final_score'] for i in aug_ids]
@@ -219,7 +248,8 @@ def stuffing_experiment(ids, labels, texts, pool, job, ref, sim, similarity, k, 
         res = nh_scores(cands, job.jd, sim, comps, vs_variant='jd')
         scores[name] = [res[i]['final_score'] for i in aug_ids]
 
-    out = {'stuffed_skills': jd_skills, 'n_stuffed': len(stuffed_texts), 'methods': {}}
+    out = {'stuffed_skills': jd_skills, 'n_stuffed': len(stuffed_texts), 'n_negatives_total':
+           sum(1 for l in labels if l <= 0), 'methods': {}}
     rng = np.random.default_rng(seed)
     for name, sc in scores.items():
         e = M.evaluate_scores(sc, aug_labels, k=k, seed=seed)
@@ -237,26 +267,26 @@ def stuffing_experiment(ids, labels, texts, pool, job, ref, sim, similarity, k, 
         }
     out['bootstrap_vs_ss_only'] = M.stratified_bootstrap(scores, aug_labels, k=k, n_boot=n_boot, seed=seed,
                                                          metrics=('AP', f'NDCG@{k}', 'AUC'),
-                                                         reference='NeuroHire: SS only')
+                                                         reference='NeuroHire: SS only', return_draws=True)
+    out['_draws'] = out['bootstrap_vs_ss_only'].pop('_draws')
     out['stuffed_VS'] = {s: stuffed_pool[s]['skill_validation_score'] for s in stuffed_pool}
     out['original_VS'] = {i: pool[i]['skill_validation_score'] for i in negatives}
     return out
 
 
-def fairness_experiment(ids, texts, pool, job, ref, sim, redact, gemini_extraction):
+def fairness_experiment(ids, texts, pool, job, ref, sim, redact, gemini_extraction, subjects=None):
     base_pool = pool if pool is not None else analyze_pool(texts, job, ref, 'first', redact, gemini_extraction)
     base = nh_scores(to_candidates(base_pool), job.jd, sim, {'SS', 'CS', 'VS', 'LV'})
     deltas, rank_moves, by_group = [], [], {}
     per_candidate = {}
     # Analyse every variant first and score their texts in one batch
     variant_analyses = {
-        rid: {vname: analyze_text(vtext, job.title, job.jd, reference_date=ref, redact=redact,
-                                  compute_similarity=False, use_gemini_extraction=gemini_extraction)
+        rid: {vname: analyze_cached(vtext, job, ref, 'first', redact, gemini_extraction)
               for vname, vtext in identity_variants(texts[rid]).items()}
-        for rid in ids
+        for rid in (subjects or ids)
     }
     sim.prefetch([va['resume_text_redacted'] for v in variant_analyses.values() for va in v.values()], job.jd)
-    for rid in ids:
+    for rid in (subjects or ids):
         cand_deltas = []
         for vname, va in variant_analyses[rid].items():
             swapped = dict(base_pool)
@@ -273,6 +303,7 @@ def fairness_experiment(ids, texts, pool, job, ref, sim, redact, gemini_extracti
     male = [s for g, v in by_group.items() if g.startswith('male') for s in v]
     return {
         'variants_per_candidate': len(COUNTERFACTUAL_NAMES),
+        'candidates_tested': len(subjects or ids),
         'mean_abs_dFS': float(np.mean(deltas)), 'max_abs_dFS': float(np.max(deltas)),
         'max_abs_rank_change': int(np.max(rank_moves)),
         'share_rank_changed': float(np.mean([m > 0 for m in rank_moves])),

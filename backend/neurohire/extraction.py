@@ -26,7 +26,9 @@ import logging
 import os
 import re
 import threading
+from bisect import bisect_right
 from datetime import date
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -197,8 +199,8 @@ def _strong_matches_on_line(line: str) -> set:
     return found
 
 
-def extract_skills(text: str) -> List[str]:
-    """Return sorted canonical skills found in résumé text (original case preferred)."""
+def _extract_skills_reference(text: str) -> List[str]:
+    """Original line-by-line implementation, kept to verify the fast version (tests)."""
     if not text:
         return []
     found = set()
@@ -227,6 +229,79 @@ def extract_skills(text: str) -> List[str]:
                 found.add(canonical)
                 break
     return sorted(found)
+
+
+
+def _line_index(text: str):
+    """(starts, ids): start offset of every splitlines() line and its index among
+    non-empty lines (None for blank lines) — maps a match position to its line."""
+    starts, ids, pos, n = [], [], 0, 0
+    for raw in text.splitlines(keepends=True):
+        starts.append(pos)
+        if raw.strip():
+            ids.append(n)
+            n += 1
+        else:
+            ids.append(None)
+        pos += len(raw)
+    return starts, ids
+
+
+def extract_skills(text: str) -> List[str]:
+    """Sorted canonical skills in the text (a new list each call; see _extract_skills_cached)."""
+    return list(_extract_skills_cached(text or ''))
+
+
+@lru_cache(maxsize=8192)
+def _extract_skills_cached(text: str) -> Tuple[str, ...]:
+    """
+    Return sorted canonical skills found in résumé text (original case preferred).
+
+    Same result as the line-by-line definition (_extract_skills_reference):
+    weak aliases count only when another strong skill is on the same line;
+    ambiguous names need a context pattern or a skills-list line. Each alias
+    pattern scans the whole text once and matches are mapped back to lines,
+    which is much faster on long résumés. Results are cached per text.
+    """
+    if not text:
+        return ()
+    starts, ids = _line_index(text)
+    lines = _skill_lines(text)
+    line_strong = [set() for _ in lines]
+    hits = []                                      # (canonical, line, is_weak)
+    for canonical, pattern in _ALIAS_PATTERNS.items():
+        for m in pattern.finditer(text):
+            li = ids[bisect_right(starts, m.start()) - 1]
+            if li is None:
+                continue
+            weak = m.group(0).lower() in _WEAK_ALIASES
+            hits.append((canonical, li, weak))
+            if not weak:
+                line_strong[li].add(canonical)
+
+    found = set()
+    for canonical, li, weak in hits:
+        if canonical not in found and (not weak or (line_strong[li] - {canonical})):
+            found.add(canonical)
+
+    # Ambiguous names (Go, R, C, Express, Spring, Swift, LESS, Ruby, AI)
+    for canonical, rule in AMBIGUOUS_SKILLS.items():
+        if canonical in found:
+            continue
+        if any(re.search(p, text, re.IGNORECASE) for p in rule["context"]):
+            found.add(canonical)
+            continue
+        token_re = _ambiguous_token_re(rule['token'])
+        for idx, line in enumerate(lines):
+            if len(line_strong[idx] - {canonical}) >= 2 and token_re.search(line):
+                found.add(canonical)
+                break
+    return tuple(sorted(found))
+
+
+@lru_cache(maxsize=64)
+def _ambiguous_token_re(token: str) -> re.Pattern:
+    return re.compile(rf"(?<![{_TOKEN_CHARS}.]){token}(?![{_TOKEN_CHARS}])")
 
 
 def find_skill_spans(text: str, skill: str) -> List[Tuple[int, int]]:
