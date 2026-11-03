@@ -133,6 +133,32 @@ class EmbedTextsTests(SimpleTestCase):
         self.assertEqual(client.calls, [['e f']])
         np.testing.assert_array_equal(again[0], first[0])
 
+    def test_cache_closes_every_connection(self):
+        """Open SQLite handles lock the file on Windows (WinError 32 on cleanup)."""
+        import sqlite3
+        opened = []
+        real_connect = sqlite3.connect
+
+        def tracking_connect(*a, **k):
+            conn = real_connect(*a, **k)
+            opened.append(conn)
+            return conn
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'c.sqlite')
+            with patch('neurohire.embeddings.sqlite3.connect', side_effect=tracking_connect):
+                cache = E.EmbeddingCache(path)
+                cache.put_many({'k': np.ones(3)})
+                cache.get_many(['k', 'missing'])
+                len(cache)
+                with self.assertRaises(ValueError):          # a failed write still closes
+                    with cache._conn() as c:
+                        raise ValueError('boom')
+            self.assertEqual(len(opened), 5)
+            for conn in opened:
+                with self.assertRaises(sqlite3.ProgrammingError):   # "Cannot operate on a closed database"
+                    conn.execute('SELECT 1')
+            os.remove(path)                                  # file is free to delete
+
     def test_progress_kept_when_a_later_request_fails(self):
         clock = FakeClock()
         texts = [f't{i} ' + 'w ' * 150 for i in range(4)]
