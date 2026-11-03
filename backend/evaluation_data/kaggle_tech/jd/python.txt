@@ -1,0 +1,19 @@
+Capgemini
+Job title: Python Developer – C1
+Location: Mumbai, India
+Experience level: Experienced professionals.
+
+Job description summary:
+
+The role focuses on developing, testing and maintaining backend applications using Python. The developer is responsible for building scalable APIs, developing microservices, integrating external applications and deploying software on cloud platforms.
+
+Key responsibilities:
+- Develop and maintain Python backend applications.
+- Build REST APIs and microservices.
+- Write reusable and maintainable code.
+- Design and optimize database schemas and queries.
+- Integrate third-party APIs.
+- Implement authentication and authorization.
+- Perform unit, integration and automation testing.
+- Deploy and manage applications on cloud platforms.
+Required skills: Python, Django, Django REST Framework, FastAPI, Flask, REST APIs, microservices, database management, cloud deployment and automated testing.

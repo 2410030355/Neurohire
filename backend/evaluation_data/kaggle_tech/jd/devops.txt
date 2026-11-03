@@ -1,0 +1,21 @@
+Wipro
+Job title: DevOps Engineer
+Location: Bengaluru, India
+Experience: 5–8 years listed in the posting.
+
+Job description summary:
+
+The role involves coordinating development, testing and operations teams by automating software integration and deployment processes. The engineer is responsible for cloud infrastructure, continuous integration, continuous deployment, application monitoring and operational reliability.
+
+Key responsibilities:
+- Manage cloud infrastructure and application platforms.
+- Develop and maintain CI/CD pipelines.
+- Automate software deployments.
+- Work with development teams on infrastructure integration.
+- Monitor application performance and reliability.
+- Troubleshoot production issues.
+- Manage deployment and operational processes.
+- Improve infrastructure automation and operational efficiency.
+Required skills: AWS, EKS, Kubernetes, Jenkins, Git, GitHub, Terraform, Linux, OpenSearch and AWS MSK.
+
+Additional skills: Redis, ELK Stack, GCP, Pub/Sub, JFrog, Ansible and Dynatrace.

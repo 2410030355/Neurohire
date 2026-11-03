@@ -1,0 +1,21 @@
+NatWest Group
+Job title: Data Scientist
+Location: Bangalore, India
+Experience: 4+ years in the listed skill set.
+
+Job description summary:
+
+The role focuses on applying statistical methods, machine learning and software engineering to develop data-driven solutions. The candidate is expected to work with business stakeholders, build analytical pipelines, train and evaluate models, and deploy reliable machine-learning solutions.
+
+Key responsibilities:
+- Develop and implement data science solutions.
+- Understand business problems and formulate analytical approaches.
+- Build, train and test machine-learning models.
+- Apply statistical and mathematical techniques.
+- Develop data analysis pipelines.
+- Work with multidisciplinary analytics teams.
+- Evaluate model performance, risk and governance.
+- Support production deployment of analytical solutions.
+Required skills: Python, Pandas, NumPy, Scikit-learn, machine learning, statistics, predictive modelling, deep learning, neural networks, time-series analysis, NLP and cloud platforms.
+
+Additional skills: LangChain, LangGraph, LLMs, AWS SageMaker and Google AI Platform.
