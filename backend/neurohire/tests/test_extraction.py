@@ -83,13 +83,13 @@ class SkillExtractionTests(SimpleTestCase):
         self.assertEqual(text[spans[0][0]:spans[0][1]], "java")
 
     def test_merge_keeps_only_gemini_skills_written_in_text(self):
-        text = "Languages: Java, SQL. Used Postman for API tests."
+        text = "Languages: Java, SQL. Used Notion for sprint notes."
         skills, other = ex.merge_skills(text, ex.extract_skills(text),
-                                        ["Java", "Kubernetes", "Postman", "Figma", "C"])
+                                        ["Java", "Kubernetes", "Notion", "Figma", "C"])
         self.assertIn("java", skills)
         self.assertNotIn("kubernetes", skills)   # not in the résumé
         self.assertNotIn("c", skills)            # ambiguous: only via context rules
-        self.assertEqual(other, ["Postman"])     # non-catalog, but present in text
+        self.assertEqual(other, ["Notion"])      # non-catalog, but present in text
 
 
 class ExperienceTests(SimpleTestCase):

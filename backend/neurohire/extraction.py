@@ -109,6 +109,31 @@ SKILL_CATALOG: Dict[str, List[str]] = {
     "tdd": ["tdd", "test-driven development", "test driven development"],
     "unit testing": ["unit testing", "unit tests"], "pytest": ["pytest"], "junit": ["junit"],
     "selenium": ["selenium"], "blockchain": ["blockchain"],
+    # ── Added for the multi-role benchmark (fixed before any benchmark run) ──
+    # Testing / QA
+    "manual testing": ["manual testing"], "automation testing": ["automation testing", "test automation"],
+    "test cases": ["test cases", "test case design", "test scenarios"], "test planning": ["test plan", "test planning"],
+    "regression testing": ["regression testing"], "functional testing": ["functional testing"],
+    "integration testing": ["integration testing"], "system testing": ["system testing"],
+    "api testing": ["api testing"], "performance testing": ["performance testing", "load testing"],
+    "uat": ["uat", "user acceptance testing"], "defect tracking": ["defect tracking", "bug tracking", "defect management"],
+    "sdlc": ["sdlc"], "stlc": ["stlc"], "testng": ["testng"], "appium": ["appium"], "jmeter": ["jmeter"],
+    "postman": ["postman"], "cucumber": ["cucumber", "bdd"], "qtp": ["qtp", "uft"], "loadrunner": ["loadrunner"],
+    "bugzilla": ["bugzilla"],
+    # Java ecosystem
+    "hibernate": ["hibernate"], "j2ee": ["j2ee", "java ee", "jee"], "jsp": ["jsp"], "servlets": ["servlets", "servlet"],
+    "jdbc": ["jdbc"], "struts": ["struts"], "maven": ["maven"], "gradle": ["gradle"],
+    # Data science
+    "matplotlib": ["matplotlib"], "seaborn": ["seaborn"], "scipy": ["scipy"], "xgboost": ["xgboost"],
+    "statistics": ["statistics", "statistical analysis"], "hadoop": ["hadoop"], "hive": ["hive", "apache hive"],
+    "excel": ["excel", "ms excel"],
+    # DevOps
+    "puppet": ["puppet"], "nagios": ["nagios"], "sonarqube": ["sonarqube"],
+    "openshift": ["openshift"], "cloudformation": ["cloudformation"], "splunk": ["splunk"],
+    "elk": ["elk stack", "elk", "logstash", "kibana"],
+    # Web design
+    "photoshop": ["photoshop"], "illustrator": ["illustrator"], "wordpress": ["wordpress"],
+    "dreamweaver": ["dreamweaver"],
 }
 
 # Ambiguous names: only counted when the line looks like a skills list (≥2 other
@@ -150,7 +175,9 @@ _ALIAS_PATTERNS: Dict[str, re.Pattern] = {
 
 # Short aliases that are also common English / abbreviations: require context too.
 _WEAK_ALIASES = {"js", "ts", "rest", "ml", "rag", "aria", "mui", "drf", "s3", "ec2", "helm",
-                 "mongo", "unix", "spark", "apollo", "babel", "jest", "vite", "rails"}
+                 "mongo", "unix", "spark", "apollo", "babel", "jest", "vite", "rails",
+                 # common words that are only skills next to other skills
+                 "hive", "excel", "elk", "puppet", "cucumber", "statistics", "uat", "jee", "illustrator"}
 
 # Canonical skill names, for code that needs a flat list (e.g. "missing skills").
 SKILL_KEYWORDS: List[str] = list(SKILL_CATALOG.keys())
